@@ -1,6 +1,6 @@
 # STA 2E for MapTool: install
 
-Tested against MapTool 1.18's source code and in a browser with a simulated MapTool. Built for MapTool 1.13 or newer (you're on 1.18.6).
+Built for MapTool 1.13 or newer. Earlier development checks used MapTool 1.18's source code and a browser with a simulated MapTool; compatibility with every MapTool release has not been verified.
 
 ## 1. Add the token types (once per campaign)
 1. **Edit → Campaign Properties → Token Properties** tab.
@@ -22,7 +22,22 @@ The GM gets a chat message when it's installed.
 - **New tokens:** set the token's property type to **STA2e Character** or **STA2e Ship** in Edit Token.
 - NPCs: set **Kind** on the Character tab (Minor, Notable or Major NPC; the injury and Stress rules differ). NPC ships: set **NPC crew quality** on the Ship tab.
 
-### Importing from the character builder (1.2)
+### Importing from the character builder: MapTool tokens (recommended)
+
+1. Install the add-on and import `STA2e-TokenTypes.mtprops` first (steps 1–2 above).
+2. In the [STA character builder](https://sta.bcholmes.org/), use **2nd Edition**, then create or open your character or starship.
+3. Use the builder's **MapTool** export option for this framework and save the `.rptok` token file.
+4. Drag the `.rptok` file onto your MapTool map.
+5. As the GM (or a player with permission to edit the token), open `/sta`. If the window is already open, press **⟳** to reload the tokens. The framework recognizes the builder export and sets it up when loaded.
+6. Select the imported character or ship in the framework and review its stats, weapons, talents, and traits. For an NPC ship, set **NPC crew quality** on the Ship tab. For the players' ship, choose **Make active ship**.
+7. Save the campaign to keep the imported token and its setup.
+
+The native token export does not go through the framework's **Import… → Choose File** JSON dialog. Drag it onto the map instead. If the token is not recognized as an STA2e token, check that the campaign has the property types installed and that the token's property type is **STA2e Character** or **STA2e Ship**, then reload the framework.
+
+### Alternative: Foundry VTT JSON import
+
+Use this route if you have an existing Foundry VTT JSON export or want to import its data onto an existing token.
+
 1. In the builder (https://sta.bcholmes.org), open the character or starship and choose **Export → Foundry VTT**. You get a .json file.
 2. In MapTool, select the token that should become that character or ship, open `/sta`, and go to the **Character** or **Ship** tab.
 3. Press **Import…**, then **Choose File** (or paste the file's contents into the box and press **Preview**).
@@ -31,7 +46,7 @@ The GM gets a chat message when it's installed.
 
 What comes across: attributes, departments, species, rank, role, values, focuses, talents, traits, Determination, Stress (a bonus is added if the builder's maximum is above Fitness), Protection 2 for Durability, and weapons (Stun/Deadly, severity, size, qualities). For ships: systems, departments, Scale, class, registry, traits, talents, weapons (type, delivery system and qualities), and the builder's Resistance and Shields (differences from the formula go into the Resistance/Shields bonus). Background details (upbringing, environment, career, equipment, mission profile, refits) and a link back to the builder go into **Notes**. Importing again replaces that block and keeps anything you wrote above it.
 
-Use the Foundry VTT export only. The Roll20 and Fantasy Grounds exports leave out Stun/Deadly, current Stress and the species talent, so the add-on refuses them.
+For the **Import…** JSON dialog, use the Foundry VTT export. Roll20 and Fantasy Grounds exports are not supported by that importer. This restriction does not apply to the native MapTool token export described above.
 
 ## Updating from 1.1
 Drag the new `STA2e.mtlib` onto the map. You don't need to import the token types again.

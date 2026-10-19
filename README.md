@@ -16,7 +16,7 @@ The bundled documentation targets MapTool 1.13 or newer. The framework has also 
 - Character attributes, departments, talents, traits, Stress, injuries, and Determination.
 - Starship systems, weapons, shields, breaches, damage, and repairs.
 - Extended tasks and consequences.
-- GM controls and character/starship imports from the STA character builder's Foundry VTT export.
+- GM controls and character/starship imports from the [STA character builder](https://sta.bcholmes.org/), including its native MapTool token export. Foundry VTT JSON import remains available as an alternative.
 
 ## Optional remote play
 

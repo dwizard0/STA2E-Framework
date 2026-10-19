@@ -22,4 +22,8 @@ Shared data (Momentum, Threat, banked assists, modifiers) is stored in the add-o
 Hovering over an STA2e token shows the **STA 2E Character** / **STA 2E Starship** stat sheet.
 
 ## Importing from the character builder
-In the builder (https://sta.bcholmes.org), export the character or starship for **Foundry VTT**. In the add-on, select the token, press **Import…** on the Character or Ship tab, choose the .json file (or paste its contents), check the preview and press **Import**. A plain token is converted to the STA2e type. Roll20 and Fantasy Grounds exports aren't supported: they leave out Stun/Deadly, Stress and the species talent.
+The recommended route is the builder's native **MapTool** export for this framework. Use **2nd Edition** in the [builder](https://sta.bcholmes.org/), create or open your character or starship, and save its `.rptok` export. Install this add-on and import `STA2e-TokenTypes.mtprops` before dragging the token onto the map. Open `/sta` (or press **⟳** if it is already open); the framework recognizes and sets up builder tokens you can edit. Review the Character or Ship tab and save the campaign. For NPC ships, set the crew quality; for the players' ship, choose **Make active ship**.
+
+Do not select a `.rptok` file in the **Import…** JSON dialog: place it on the map instead.
+
+**Alternative: Foundry VTT JSON.** Export the character or starship for **Foundry VTT**. In the add-on, select the destination token, press **Import…** on the Character or Ship tab, choose the `.json` file (or paste its contents), check the preview and press **Import**. A plain token is converted to the STA2e type. Roll20 and Fantasy Grounds exports are not supported by this JSON importer.
