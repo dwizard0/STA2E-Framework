@@ -1,0 +1,5 @@
+* text=auto
+src/** -text
+*.mtlib binary
+*.mtprops binary
+*.png binary

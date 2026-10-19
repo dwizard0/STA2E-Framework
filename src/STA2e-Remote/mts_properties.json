@@ -1,0 +1,9 @@
+{
+  "properties": [
+    { "filename": "public/onFirstInit.mts", "description": "Runs when the add-on is first added." },
+    { "filename": "public/open.mts", "description": "Open the STA2e Remote link window." },
+    { "filename": "public/api/libGet.mts", "description": "STA2e Remote internal API: read settings" },
+    { "filename": "public/api/libSet.mts", "description": "STA2e Remote internal API: write settings (GM only)" },
+    { "filename": "public/api/sync.mts", "description": "STA2e Remote internal API: call the relay server (GM only)" }
+  ]
+}

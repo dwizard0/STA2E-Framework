@@ -1,0 +1,20 @@
+{
+  "statSheets": [
+    {
+      "name": "sta2e-character",
+      "description": "STA 2E Character",
+      "entry": "sheets/character.hbs",
+      "propertyTypes": [
+        "STA2e Character"
+      ]
+    },
+    {
+      "name": "sta2e-ship",
+      "description": "STA 2E Starship",
+      "entry": "sheets/ship.hbs",
+      "propertyTypes": [
+        "STA2e Ship"
+      ]
+    }
+  ]
+}

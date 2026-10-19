@@ -1,0 +1,12 @@
+[h: "STA2e API: move a token to the middle of the current view. Args: id, map. The token must be on the current map."]
+[h: req = macro.args]
+[h: id = json.get(req, "id")]
+[h: m = json.get(req, "map")]
+[h: cur = getCurrentMapName()]
+[h, if(m != cur): out = json.set("{}", "ok", 0, "error", "wrongMap", "map", m)]
+[h, if(m == cur), code: {
+  [h: c = getViewCenter(0, "json")]
+  [h: moveToken(json.get(c, "centerX"), json.get(c, "centerY"), 0, id)]
+  [h: out = json.set("{}", "ok", 1)]
+}]
+[r: out]

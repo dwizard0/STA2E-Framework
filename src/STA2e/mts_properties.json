@@ -1,0 +1,15 @@
+{
+  "properties": [
+    { "filename": "public/onFirstInit.mts", "description": "Runs when the add-on is first added: seeds Momentum and Threat." },
+    { "filename": "public/open.mts", "description": "Open the STA 2E window. Optional argument: roll, actions, character, ship or gm." },
+    { "filename": "public/api/ctx.mts", "description": "STA2e internal API: context" },
+    { "filename": "public/api/tokenGet.mts", "description": "STA2e internal API: read token properties" },
+    { "filename": "public/api/tokenCreate.mts", "description": "STA2e internal API: create a token" },
+    { "filename": "public/api/tokenMove.mts", "description": "STA2e internal API: move a token into view" },
+    { "filename": "public/api/tokenSet.mts", "description": "STA2e internal API: write token properties" },
+    { "filename": "public/api/libGet.mts", "description": "STA2e internal API: read shared data" },
+    { "filename": "public/api/libSet.mts", "description": "STA2e internal API: write shared data" },
+    { "filename": "public/api/roll.mts", "description": "STA2e internal API: roll dice" },
+    { "filename": "public/api/chat.mts", "description": "STA2e internal API: post to chat" }
+  ]
+}

@@ -1,0 +1,6 @@
+[h: "STA2e API: post to chat. Args: html and to, where to is all, gm, self or gm-self."]
+[h: msg = json.get(macro.args, "html")]
+[h: to = json.get(macro.args, "to")]
+[h: toAll = if(to == "", 1, if(to == "all", 1, 0))]
+[h, if(toAll): broadcast(msg); broadcast(msg, to)]
+[r: json.set("{}", "ok", 1)]

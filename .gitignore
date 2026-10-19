@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+*connection.json
+*.cmpgn
+*.rptok
+*.log
+.DS_Store
+Thumbs.db

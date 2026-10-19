@@ -1,0 +1,17 @@
+<html>
+<head>
+<link rel="stylesheet" href="lib://net.rptools.maptool/css/mt-stat-sheet.css?cachelib=false"/>
+<link rel="stylesheet" href="./sheet.css?cachelib=false"/>
+</head>
+<body>
+<div id="statSheet" class="{{statSheetLocation}}">
+<div class="sta ship">
+<div class="hdr">
+{{#if portrait}}<img class="pt" src="{{portrait}}"/>{{else if image}}<img class="pt" src="{{image}}"/>{{/if}}
+<div class="id"><div class="nm">{{name}}</div>
+<div class="sub">{{#each properties}}{{#eq name "Class"}}<span>{{value}}</span>{{/eq}}{{#eq name "Registry"}}<span>{{value}}</span>{{/eq}}{{#eq name "Scale"}}<span>Scale {{value}}</span>{{/eq}}{{/each}}</div>
+{{#each properties}}{{#eq name "Status"}}<div class="status">{{value}}</div>{{/eq}}{{/each}}
+</div></div>
+<table class="g"><tr>{{#each properties}}{{#eq name "Communications"}}<td><div class="k">COMM</div><div class="v">{{value}}</div></td>{{/eq}}{{#eq name "Computers"}}<td><div class="k">COMP</div><div class="v">{{value}}</div></td>{{/eq}}{{#eq name "Engines"}}<td><div class="k">ENG</div><div class="v">{{value}}</div></td>{{/eq}}{{#eq name "Sensors"}}<td><div class="k">SENS</div><div class="v">{{value}}</div></td>{{/eq}}{{#eq name "Structure"}}<td><div class="k">STRC</div><div class="v">{{value}}</div></td>{{/eq}}{{#eq name "Weapons"}}<td><div class="k">WPN</div><div class="v">{{value}}</div></td>{{/eq}}{{/each}}</tr></table><table class="g"><tr>{{#each properties}}{{#eq name "Command"}}<td><div class="k">CMD</div><div class="v">{{value}}</div></td>{{/eq}}{{#eq name "Conn"}}<td><div class="k">CONN</div><div class="v">{{value}}</div></td>{{/eq}}{{#eq name "Engineering"}}<td><div class="k">ENG</div><div class="v">{{value}}</div></td>{{/eq}}{{#eq name "Medicine"}}<td><div class="k">MED</div><div class="v">{{value}}</div></td>{{/eq}}{{#eq name "Science"}}<td><div class="k">SCI</div><div class="v">{{value}}</div></td>{{/eq}}{{#eq name "Security"}}<td><div class="k">SEC</div><div class="v">{{value}}</div></td>{{/eq}}{{/each}}</tr></table>{{#each properties}}{{#eq name "ShieldsText"}}<div class="ln "><span class="lk">Shields</span> {{value}}</div>{{/eq}}{{#eq name "ShieldsPct"}}<div class="bar"><div class="fill shields" style="width:{{value}}%"></div><div class="m50"></div><div class="m25"></div></div>{{/eq}}{{#eq name "Resistance"}}<div class="ln "><span class="lk">Resistance</span> {{value}}</div>{{/eq}}{{#eq name "PowerStatus"}}<div class="ln "><span class="lk">Power</span> {{value}}</div>{{/eq}}{{#eq name "BreachList"}}<div class="ln bad"><span class="lk">Breaches</span> {{value}}</div>{{/eq}}{{#eq name "EffectList"}}<div class="ln dim"><span class="lk">Effects</span> {{value}}</div>{{/eq}}{{/each}}</div></div>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "STA2e Remote",
+  "version": "0.4.0",
+  "website": "wizardsgate.net",
+  "authors": ["Dustin Freeman"],
+  "license": "Personal use",
+  "namespace": "net.wizardsgate.sta2e.remote",
+  "description": "Lets players roll and act as their Star Trek Adventures 2E characters from a web page. The GM assigns characters to each player's connection; this add-on runs their commands through the STA 2E add-on. Needs the STA 2E add-on and a relay server (api.php).",
+  "shortDescription": "Remote play for the STA 2E add-on",
+  "allowsUriAccess": true,
+  "readMeFile": "README.md"
+}

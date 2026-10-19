@@ -1,0 +1,13 @@
+[h: "STA2e API: read token properties. Args: tokens (list of id and map) and props (list of names). Returns an object keyed by token id."]
+[h: req = macro.args]
+[h: list = json.get(req, "tokens")]
+[h: props = json.get(req, "props")]
+[h: out = "{}"]
+[h, foreach(t, list), code: {
+  [h: id = json.get(t, "id")]
+  [h: m = json.get(t, "map")]
+  [h: p = "{}"]
+  [h, foreach(k, props): p = json.set(p, k, getProperty(k, id, m))]
+  [h: out = json.set(out, id, json.set("{}", "name", getName(id, m), "type", getPropertyType(id, m), "map", m, "props", p))]
+}]
+[r: out]

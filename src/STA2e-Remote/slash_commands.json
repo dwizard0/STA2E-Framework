@@ -1,0 +1,9 @@
+{
+  "slashCommands": [
+    {
+      "name": "staremote",
+      "description": "Open the STA2e Remote link window (GM)",
+      "command": "[h, macro(\"open@lib:net.wizardsgate.sta2e.remote\"): \"\"]"
+    }
+  ]
+}

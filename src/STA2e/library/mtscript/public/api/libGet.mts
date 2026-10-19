@@ -1,0 +1,5 @@
+[h: "STA2e API: read shared add-on data such as Momentum, Threat, banked assists. Args: keys (list of names)."]
+[h: keys = json.get(macro.args, "keys")]
+[h: out = "{}"]
+[h, foreach(k, keys): out = json.set(out, k, getLibProperty(k, "lib:net.wizardsgate.sta2e"))]
+[r: out]

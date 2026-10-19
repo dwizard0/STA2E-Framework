@@ -1,0 +1,5 @@
+[h: "STA2e API: write shared add-on data. Args: values (name to value)."]
+[h: vals = json.get(macro.args, "values")]
+[h: keys = json.fields(vals, "json")]
+[h, foreach(k, keys): setLibProperty(k, json.get(vals, k), "lib:net.wizardsgate.sta2e")]
+[r: json.set("{}", "ok", 1)]

@@ -1,0 +1,12 @@
+{
+  "name": "Star Trek Adventures 2E",
+  "version": "1.3.0",
+  "website": "wizardsgate.net",
+  "authors": ["Dustin Freeman"],
+  "license": "Personal use",
+  "namespace": "net.wizardsgate.sta2e",
+  "description": "Star Trek Adventures 2nd Edition framework: task roller with assists and ship assist die, Momentum/Threat pools, bridge station and personal conflict actions, Stress and Injuries, starship shields, breaches and damage.",
+  "shortDescription": "Star Trek Adventures 2E framework",
+  "allowsUriAccess": true,
+  "readMeFile": "README.md"
+}

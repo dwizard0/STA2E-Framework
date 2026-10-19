@@ -1,0 +1,7 @@
+[h: "Runs once when the add-on is first added to a campaign: seed the shared pools. (Must live in public/: MapTool runs event macros without private access.)"]
+[h: ns = "lib:net.wizardsgate.sta2e"]
+[h: m = getLibProperty("Momentum", ns)]
+[h, if(m == ""): setLibProperty("Momentum", 0, ns)]
+[h: t = getLibProperty("Threat", ns)]
+[h, if(t == ""): setLibProperty("Threat", 0, ns)]
+[h: broadcast("<b>STA 2E add-on installed.</b> Type <b>/sta</b> in chat to open the STA 2E window.", "gm")]

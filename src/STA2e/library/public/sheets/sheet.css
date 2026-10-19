@@ -1,0 +1,38 @@
+
+body { position: fixed; margin: 0; padding: 0; background-color: rgba(0,0,0,0); font-family: "Segoe UI", Arial, sans-serif; }
+.statSheet-topLeft { position: fixed; left: 0; top: 0; }
+.statSheet-topRight { position: fixed; right: 0; top: 0; }
+.statSheet-bottomLeft { position: fixed; left: 0; bottom: 0; }
+.statSheet-bottomRight { position: fixed; right: 0; bottom: 0; }
+.statSheet-top { position: fixed; left: 50%; top: 0; transform: translate(-50%, 0); }
+.statSheet-bottom { position: fixed; left: 50%; bottom: 0; transform: translate(-50%, 0); }
+.statSheet-left { position: fixed; left: 0; top: 50%; transform: translate(0, -50%); }
+.statSheet-right { position: fixed; right: 0; top: 50%; transform: translate(0, -50%); }
+/* MapTool's mt-stat-sheet.css gives #statSheet the theme background, padding and text colour: undo that. */
+#statSheet { background-color: transparent !important; background: transparent !important; padding: 0 !important; margin: 0 !important;
+  border: none !important; color: #ffffff !important; }
+.sta { width: 330px; background: rgba(13,15,23,.94); color: #ffffff; border: 2px solid #f29c38; border-radius: 16px 6px 16px 6px;
+  padding: 8px 10px; font-size: 12px; margin: 4px; }
+.sta div, .sta span, .sta td { color: #ffffff; }
+.sta.ship { border-color: #6fa8ff; }
+.hdr { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.pt { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; border: 2px solid #2c3349; }
+.sta .nm { font-weight: 700; font-size: 15px; color: #f29c38; }
+.sta.ship .nm { color: #6fa8ff; }
+.sub span { color: #ffffff; margin-right: 8px; }
+.sta .status { color: #ff6b6b; font-weight: 700; font-size: 11px; letter-spacing: .5px; }
+table.g { width: 100%; border-collapse: separate; border-spacing: 3px; margin: 0 -3px; }
+table.g td { background: #1d2233; border-radius: 6px; text-align: center; padding: 2px 0; width: 16.6%; }
+.sta .k { font-size: 9px; color: #c9cfdd; letter-spacing: .5px; }
+.sta .v { font-size: 16px; font-weight: 700; color: #ffffff; }
+.ln { margin-top: 4px; }
+.sta .lk { color: #b69ae0; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .6px; margin-right: 4px; }
+.sta .ln.bad { color: #ffb3b3; }
+.sta .ln.dim { color: #ffffff; }
+.bar { position: relative; height: 8px; background: #1d2233; border-radius: 4px; overflow: hidden; margin-top: 3px; }
+.fill { position: absolute; left: 0; top: 0; bottom: 0; }
+.fill.stress { background: #f29c38; }
+.fill.shields { background: #56d0e0; }
+.m50, .m25 { position: absolute; top: 0; bottom: 0; width: 2px; }
+.m50 { left: 50%; background: #f2c94c; }
+.m25 { left: 25%; background: #ff6b6b; }

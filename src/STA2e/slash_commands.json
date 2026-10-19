@@ -1,0 +1,9 @@
+{
+  "slashCommands": [
+    {
+      "name": "sta",
+      "description": "Open the Star Trek Adventures 2E window",
+      "command": "[h, macro(\"open@lib:net.wizardsgate.sta2e\"): \"\"]"
+    }
+  ]
+}

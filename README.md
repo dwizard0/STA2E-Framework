@@ -1,2 +1,43 @@
-# STA2E-Framework
-Star Trek Adventures 2nd Edition framework for MapTool
+# STA2E Framework for MapTool
+
+A Star Trek Adventures 2nd Edition framework for MapTool, by Dustin Freeman.
+
+## Download and install
+
+Download [STA2e.mtlib](dist/STA2e.mtlib) and [STA2e-TokenTypes.mtprops](dist/STA2e-TokenTypes.mtprops) using GitHub's **Download raw file** button. Import the token properties into your campaign and install the add-on library, then type `/sta` in MapTool chat.
+
+See [INSTALL.md](INSTALL.md) for setup, character import, and upgrade instructions. Back up your campaign before upgrading.
+
+The bundled documentation targets MapTool 1.13 or newer. The framework has also been used in the author's MapTool sessions; compatibility with every intervening release has not been verified.
+
+## Features
+
+- Task rolls, focuses, assists, opposed rolls, and Momentum/Threat spending.
+- Character attributes, departments, talents, traits, Stress, injuries, and Determination.
+- Starship systems, weapons, shields, breaches, damage, and repairs.
+- Extended tasks and consequences.
+- GM controls and character/starship imports from the STA character builder's Foundry VTT export.
+
+## Optional remote play
+
+[STA2e-Remote.mtlib](dist/STA2e-Remote.mtlib) lets players interact through a web page while the GM runs MapTool. Read the [remote add-on instructions](src/STA2e-Remote/README.md).
+
+The remote add-on requires a separate `api.php` relay server. The relay implementation is not included in this repository. The supplied add-on has `https://wizardsgate.net/sta-remote/api.php` as its default server address; this is not a promise of public relay access. Configure a relay you are authorized to use.
+
+## Source and maintenance
+
+| Location | Purpose |
+| --- | --- |
+| `src/STA2e/` | Core add-on source (1.3.0) |
+| `src/STA2e-Remote/` | Remote add-on source (0.6.0) |
+| `src/STA2e-TokenTypes/` | Campaign property package source |
+| `dist/` | Installable MapTool packages |
+| `tools/build.py` | Package builder and source/package consistency check |
+
+Edit source under `src/`, run `python tools/build.py`, and commit both source and updated packages. Run `python tools/build.py --check` to verify that the packages match the source. See [CONTRIBUTING.md](CONTRIBUTING.md) for the maintenance workflow.
+
+This initial repository contains the original framework and remote add-on. The experimental GM voice connector is maintained separately from this baseline.
+
+## License and attribution
+
+The original add-on manifests designate the license as **Personal use**. This repository preserves that designation and does not add an open-source license or grant additional rights. Star Trek and Star Trek Adventures names and third-party materials remain the property of their respective owners. This is an unofficial fan framework.
