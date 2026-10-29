@@ -15,6 +15,10 @@
 - `api/tokenGet`: players only get tokens on maps they can see, and Notes are blank on tokens they don't own.
 - The STA2e Remote add-on uses the same pool changes for its players' rolls, spends and banking.
 
+### Error handling
+- `api/tokenSet` and `api/tokenGet` check that the token is still on the given map. If it has moved, been deleted, or its map was renamed since the window last loaded, the window now says "MapTool can't find … press ⟳" right away instead of timing out after 15 seconds.
+- Apply Injury, Apply damage, the other Apply buttons and extended-task progress only show "Applied." after MapTool has saved the change. A failed save leaves the button available, and a second click while saving does nothing.
+
 ### Other
 - Token types: new `ShieldsLowered` ship property. Re-importing `STA2e-TokenTypes.mtprops` is recommended but not required.
 - `STA2e-preview.html` refreshed from the current app (it was still 1.2.0).

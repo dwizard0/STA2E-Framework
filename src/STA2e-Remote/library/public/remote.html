@@ -1128,7 +1128,9 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
   };
 
   // The API macros refuse writes the caller isn't allowed to make (see api/libSet and api/tokenSet).
-  function checkRefused(res, what) {
+  function checkRefused(res, what, where) {
+    if (res && res.error === "noToken") throw new Error("MapTool can't find " + (what || "that token") + (where ? " on map \u201c" + where + "\u201d" : "") +
+      ". It may have moved to another map, or the map was renamed. Press \u27f3 and try again.");
     var refused = (res && Array.isArray(res.refused)) ? res.refused : [];
     if (refused.length) throw new Error("Only the GM" + (what ? " or the token's owner" : "") + " can change " +
       (what ? what + "'s " : "") + refused.join(", ") + ". Press ⟳ to reload.");
@@ -1226,7 +1228,7 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     }
     var args = { id: t.id, map: t.map, props: out };
     if (newType) { args.type = newType; t.type = newType; t.isShip = newType === A.SHIP_TYPE; t.isSTA = true; }
-    return A.api("tokenSet", args).then(function (res) { return checkRefused(res, t.name); });
+    return A.api("tokenSet", args).then(function (res) { return checkRefused(res, t.name, t.map); });
   };
 
   // Bring a token into the middle of the map view (e.g. one placed off-screen).
@@ -1389,7 +1391,7 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       case "tokenGet":
         out = {};
         (args.tokens || []).forEach(function (m) {
-          var t = tokens[m.id]; if (!t) return;
+          var t = tokens[m.id]; if (!t || (m.map && t.map !== m.map)) return;   // as api/tokenGet.mts: missing tokens are left out
           var p = {}; (args.props || []).forEach(function (k) { p[k] = t.props[k] === undefined ? "" : t.props[k]; });
           if (!ctxOverride.isGM && t.owner !== 1) p.Notes = "";   // as api/tokenGet.mts
           out[m.id] = { name: t.name, type: t.type, map: t.map, props: p };
@@ -1397,7 +1399,9 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
         break;
       case "tokenSet": {
         // Same rule as api/tokenSet.mts: GM and owners write anything; other players only conflict state.
-        var t = tokens[args.id], full = ctxOverride.isGM || t.owner === 1, refused = [], written = 0;
+        var t = tokens[args.id];
+        if (!t || (args.map && t.map !== args.map)) { out = { ok: 0, error: "noToken", count: 0, refused: [] }; break; }
+        var full = ctxOverride.isGM || t.owner === 1, refused = [], written = 0;
         if (args.type) { if (full) t.type = args.type; else refused.push("type"); }
         if (args.name) { if (full) t.name = args.name; else refused.push("name"); }
         Object.keys(args.props || {}).forEach(function (k) {

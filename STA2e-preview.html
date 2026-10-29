@@ -1128,7 +1128,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   };
 
   // The API macros refuse writes the caller isn't allowed to make (see api/libSet and api/tokenSet).
-  function checkRefused(res, what) {
+  function checkRefused(res, what, where) {
+    if (res && res.error === "noToken") throw new Error("MapTool can't find " + (what || "that token") + (where ? " on map \u201c" + where + "\u201d" : "") +
+      ". It may have moved to another map, or the map was renamed. Press \u27f3 and try again.");
     var refused = (res && Array.isArray(res.refused)) ? res.refused : [];
     if (refused.length) throw new Error("Only the GM" + (what ? " or the token's owner" : "") + " can change " +
       (what ? what + "'s " : "") + refused.join(", ") + ". Press ⟳ to reload.");
@@ -1226,7 +1228,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     }
     var args = { id: t.id, map: t.map, props: out };
     if (newType) { args.type = newType; t.type = newType; t.isShip = newType === A.SHIP_TYPE; t.isSTA = true; }
-    return A.api("tokenSet", args).then(function (res) { return checkRefused(res, t.name); });
+    return A.api("tokenSet", args).then(function (res) { return checkRefused(res, t.name, t.map); });
   };
 
   // Bring a token into the middle of the map view (e.g. one placed off-screen).
@@ -1389,7 +1391,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       case "tokenGet":
         out = {};
         (args.tokens || []).forEach(function (m) {
-          var t = tokens[m.id]; if (!t) return;
+          var t = tokens[m.id]; if (!t || (m.map && t.map !== m.map)) return;   // as api/tokenGet.mts: missing tokens are left out
           var p = {}; (args.props || []).forEach(function (k) { p[k] = t.props[k] === undefined ? "" : t.props[k]; });
           if (!ctxOverride.isGM && t.owner !== 1) p.Notes = "";   // as api/tokenGet.mts
           out[m.id] = { name: t.name, type: t.type, map: t.map, props: p };
@@ -1397,7 +1399,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         break;
       case "tokenSet": {
         // Same rule as api/tokenSet.mts: GM and owners write anything; other players only conflict state.
-        var t = tokens[args.id], full = ctxOverride.isGM || t.owner === 1, refused = [], written = 0;
+        var t = tokens[args.id];
+        if (!t || (args.map && t.map !== args.map)) { out = { ok: 0, error: "noToken", count: 0, refused: [] }; break; }
+        var full = ctxOverride.isGM || t.owner === 1, refused = [], written = 0;
         if (args.type) { if (full) t.type = args.type; else refused.push("type"); }
         if (args.name) { if (full) t.name = args.name; else refused.push("name"); }
         Object.keys(args.props || {}).forEach(function (k) {
@@ -1943,15 +1947,18 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       var av = R.canAvoidInjury(target.p, sev);
       if (av.ok) rows.push("They may Avoid Injury: " + A.esc(av.reason));
     }
-    res.applied = true;
-    A.saveToken(target, { Injuries: inj, Defeated: 1 }).then(function () {
-      return A.chat(A.card(res.name + " hits " + target.name, w.name, rows, "#b3261e"));
-    }).then(A.render).catch(A.fail);
+    return applyGuard(res, "applied", function () {
+      return A.saveToken(target, { Injuries: inj, Defeated: 1 }).then(function () {
+        res.applied = true;
+        return A.chat(A.card(res.name + " hits " + target.name, w.name, rows, "#b3261e"));
+      });
+    });
   };
 
   A.applyShipAttack = function () {
     var res = S.r.result, target = A.tok(res.atk.target), atkShip = attackingShip(), w = currentShipWeapon();
     if (!target || !w || !atkShip) return A.toast("Choose a weapon and target ship.");
+    return applyGuard(res, "applied", function () {
     var q = w.prof.qualities, notes = [];
     var dmg = w.prof.damage + res.extra.damage;
     if (res.atk.salvo && w.raw.kind === "torpedo") { dmg += 1; notes.push("Salvo +1"); }
@@ -1997,15 +2004,17 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       var np = Object.assign({}, target.p, { Breaches: breaches });
       R.SYSTEMS.forEach(function (s) { if (R.systemDestroyed(np, s) && !R.systemDestroyed(target.p, s)) rows.push("<b>" + s + " DESTROYED.</b>"); });
       if (R.criticalDamage(np)) rows.push('<font color="#b3261e"><b>CRITICAL DAMAGE: ' + A.esc(target.name) + " can no longer function.</b></font>");
-      res.applied = true;
       return A.saveToken(target, { Shields: shields, Breaches: breaches }).then(function () {
+        res.applied = true;
         return A.chat(A.card(atkShip.name + " fires on " + target.name, w.prof.name, rows, "#b3261e"));
       });
-    }).then(A.render).catch(A.fail);
+    });
+    });
   };
 
   A.applySimpleEffect = function () {
     var res = S.r.result, a = res.action, ship = attackingShip() || A.activeShip(), t = roller();
+    return applyGuard(res, "applied", function () {
     var jobs = [], msg = "";
     if (a.effect === "regenShields" && ship) {
       var gain = (t.isShip ? (R.crewQualityRatings(t.p.CrewQuality || "Proficient") || { dept: 2 }).dept : t.p.Engineering) + res.extra.shields;
@@ -2051,10 +2060,23 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       jobs.push(A.saveToken(ship, { Shields: o2.shieldsAfter, Breaches: R.addBreaches(ship.p.Breaches, "Structure", o2.breaches) }));
       msg = "Ram! " + tg.name + " takes " + o1.final + " (" + o1.breaches + " breach) and " + ship.name + " takes " + o2.final + " (" + o2.breaches + " breach). Devastating; breaches applied to Structure, reassign if the GM prefers.";
     }
-    res.applied = true;
-    Promise.all(jobs).then(function () { if (msg) return A.chat(A.card(res.name + ": " + a.name, "", [A.esc(msg)], "#4cc38a")); })
-      .then(A.render).catch(A.fail);
+    return Promise.all(jobs).then(function () {
+      res.applied = true;
+      if (msg) return A.chat(A.card(res.name + ": " + a.name, "", [A.esc(msg)], "#4cc38a"));
+    });
+    });
   };
+
+  // Apply a roll's result once. work() sets the flag itself as soon as MapTool has saved the change, so a
+  // failed save leaves the Apply button there (instead of showing "Applied.") and a second click does nothing.
+  function applyGuard(res, flag, work) {
+    var busy = flag + "Busy";
+    if (res[flag] || res[busy]) return Promise.resolve();
+    res[busy] = true; A.render();
+    return Promise.resolve().then(work).then(function () { res[busy] = false; A.render(); },
+      function (e) { res[busy] = false; A.render(); A.fail(e); });
+  }
+  A.applyGuard = applyGuard;
 
   /* ---------------- rendering ---------------- */
   A.renderRoll = function () {
@@ -2477,6 +2499,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     if (!a || !a.effect) return null;
     var card = h("div", { class: "card" }, h("h3", null, "Apply result"));
     if (res.applied) { card.appendChild(h("div", { class: "notice info" }, "Applied.")); return card; }
+    if (res.appliedBusy) { card.appendChild(h("div", { class: "notice info" }, "Saving…")); return card; }
     if (a.effect === "personalAttack") {
       var tg = A.tok(res.atk.target), w = currentPersonalWeapon();
       card.appendChild(h("div", { class: "row" }, h("span", null, "Inflict a " + (w && w.injury === "both" ? res.atk.injury : (w ? w.injury : "")) + " Injury (severity " + (w ? w.severity : "?") +
@@ -2581,11 +2604,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       rows.push("<b>Breakthrough " + n + "!</b> " + A.esc((x.notes || [])[n - 1] || "The situation changes (GM describes)."));
     });
     if (adv.complete) rows.push('<font color="#1e7b34"><b>Extended task complete.</b></font>');
-    res.xApplied = true;
-    update(x.id, { progress: adv.progress, done: adv.complete, bonusNext: 0,
-      log: logLine(x, res.name + ": +" + adv.marked + " (" + adv.progress + "/" + x.track + ")") })
-      .then(function () { return A.chat(A.card(x.name, "extended task", rows, "#6fa8ff")); })
-      .then(A.render).catch(A.fail);
+    return A.applyGuard(res, "xApplied", function () {
+      return update(x.id, { progress: adv.progress, done: adv.complete, bonusNext: 0,
+        log: logLine(x, res.name + ": +" + adv.marked + " (" + adv.progress + "/" + x.track + ")") })
+        .then(function () { res.xApplied = true; return A.chat(A.card(x.name, "extended task", rows, "#6fa8ff")); });
+    });
   }
 
   /* ---------- consequences ---------- */
