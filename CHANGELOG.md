@@ -1,6 +1,17 @@
 # Changelog
 
-## Core 1.5.0 (unreleased)
+## Core 1.6.0 (unreleased)
+
+### Multiplayer
+- **Banked assists** go through a new `api/assists` macro that adds or removes individual assists, reading the current list in the same call. Before, each assist roll and each task that used assists rewrote the whole list, so two players banking at once lost one assist. A task could also wipe an assist banked after the window loaded.
+- **Extended tasks**: marking progress re-reads the track first and saves through a new `api/extendedPatch` macro that changes only that task. Progress marked by two players stacks, and a change the GM makes to another task at the same time is kept. Players can change only progress (progress, done, the breakthrough bonus and the log). Creating, deleting and editing tasks stay with the GM.
+- **Opposed tasks** (p.256): the reactive roll has an **Against** choice. When it names the attacker, only that roller picks up the Difficulty; other rollers see that it's waiting. "Whoever rolls next" keeps the old behavior. The GM tab shows who it's against.
+- **End Scene** also clears banked assists.
+
+### Tests
+- End-to-end tests for each change: assists banked and used while another player banks, the opposed target, extended progress marked meanwhile, the player field limit, and End Scene.
+
+## Core 1.5.0
 
 ### Ship combat rules
 - **Shaken** (p.308-309): for a player ship, the commanding officer now picks the result. The damage leaves a "Shaken: pick a result" effect, and the Ship tab offers Brace for Impact!, Losing Power!, Casualties and Minor Damage, or Roll d20. A roll of 19-20 rolls again. Before, the result was rolled at random and a 19-20 just said "Roll Again". Several Shaken results from one attack stack up to be picked one at a time.

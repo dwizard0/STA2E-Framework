@@ -920,7 +920,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.NS = "net.wizardsgate.sta2e";
   A.CHAR_TYPE = "STA2e Character";
   A.SHIP_TYPE = "STA2e Ship";
-  A.VERSION = "1.5.0";
+  A.VERSION = "1.6.0";
 
   A.CHAR_PROPS = R.ATTRIBUTES.concat(R.DEPARTMENTS, ["Kind", "Species", "Rank", "Role", "Focuses", "Values", "Talents",
     "Stress", "StressBonus", "Determination", "Injuries", "Defeated", "FatiguedAttribute", "Protection", "Weapons", "Traits", "Notes",
@@ -1145,6 +1145,26 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.saveExtended = function (list) {
     S.lib.Extended = list;
     return A.api("libSet", { values: { Extended: { list: list } } }).then(checkRefused);
+  };
+
+  // Bank or use assists as a change, so assists banked by two players at once are both kept (api/assists).
+  // add: {tokenId: [entries]}, remove: {tokenId: [assist ids]}.
+  A.changeAssists = function (add, remove) {
+    return A.api("assists", { add: add || {}, remove: remove || {} }).then(function (res) {
+      if (!res || !num(res.ok, 0)) throw new Error("MapTool didn't update the banked assists.");
+      S.lib.Assists = (res.Assists && typeof res.Assists === "object") ? res.Assists : {};
+      return res;
+    });
+  };
+
+  // Change one extended task without rewriting the others (api/extendedPatch).
+  A.patchExtended = function (id, patch) {
+    return A.api("extendedPatch", { id: id, patch: patch }).then(function (res) {
+      checkRefused(res);
+      if (!res || !num(res.found, 0)) throw new Error("That extended task no longer exists. Press ⟳ to reload.");
+      if (Array.isArray(res.list)) S.lib.Extended = res.list;
+      return res;
+    });
   };
 
   // The API macros refuse writes the caller isn't allowed to make (see api/libSet and api/tokenSet).
@@ -1480,6 +1500,28 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         if (!err) { lib.Momentum = m1; lib.Threat = t1; }
         out = { ok: err ? 0 : 1, error: err, Momentum: m1, Threat: t1, dMomentum: m1 - m0, dThreat: t1 - t0 }; break;
       }
+      case "assists": {
+        // Mirrors api/assists.mts.
+        var all = JSON.parse(JSON.stringify(lib.Assists && typeof lib.Assists === "object" ? lib.Assists : {}));
+        Object.keys(args.add || {}).forEach(function (tid) { all[tid] = (all[tid] || []).concat(args.add[tid] || []); });
+        Object.keys(args.remove || {}).forEach(function (tid) {
+          var drop = args.remove[tid] || [];
+          var keep = (all[tid] || []).filter(function (a) { return drop.indexOf(a.id) < 0; });
+          if (keep.length) all[tid] = keep; else delete all[tid];
+        });
+        lib.Assists = all;
+        out = { ok: 1, Assists: JSON.parse(JSON.stringify(all)) }; break;
+      }
+      case "extendedPatch": {
+        // Mirrors api/extendedPatch.mts.
+        var pf = ["progress", "done", "bonusNext", "log"], patch = args.patch || {};
+        var refusedF = ctxOverride.isGM ? [] : Object.keys(patch).filter(function (f) { return pf.indexOf(f) < 0; });
+        var xl = ((lib.Extended && lib.Extended.list) || []).map(function (x) { return JSON.parse(JSON.stringify(x)); });
+        var hit = xl.filter(function (x) { return x.id === args.id; })[0];
+        var write = !!hit && !refusedF.length;
+        if (write) { Object.assign(hit, JSON.parse(JSON.stringify(patch))); lib.Extended = { list: xl }; }
+        out = { ok: write ? 1 : 0, found: hit ? 1 : 0, refused: refusedF, list: JSON.parse(JSON.stringify((lib.Extended && lib.Extended.list) || [])) }; break;
+      }
       case "roll": {
         var forced = root.MockDice || [];
         out = []; for (var i = 0; i < (args.n || 1); i++) out.push(forced.length ? forced.shift() : 1 + Math.floor(Math.random() * 20));
@@ -1523,7 +1565,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     S.r = {
       tokenId: tokenId || (S.r && S.r.tokenId) || A.defaultRoller(),
       mode: "task", actionId: null, attr: "", dept: "", focus: "",
-      baseDiff: 1, diffNote: "", applyMods: true, useOpposed: true, compRange: 1,
+      baseDiff: 1, diffNote: "", applyMods: true, useOpposed: true, opposeId: "", compRange: 1,
       bonusDice: 0, bonusMomentum: 0, buy: [0, 0, 0], perfect: false,
       ship: { use: false, id: "", system: "", dept: "" },
       excluded: {}, extraPay: "momentum", targets: [],
@@ -1621,7 +1663,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   function difficultyInfo(t) {
     var r = S.r, parts = [], total;
     var opp = S.lib.Opposed;
-    var usingOpp = r.mode === "task" && r.useOpposed && opp && opp.value !== undefined && opp.fromId !== r.tokenId;
+    var usingOpp = r.mode === "task" && r.useOpposed && A.opposedFor(opp, r.tokenId);
     var base = usingOpp ? num(opp.value, 0) : r.baseDiff;
     parts.push(usingOpp ? "Opposed " + base + " (" + opp.fromName + ")" : "Base " + base);
     total = base;
@@ -1807,6 +1849,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         bonusMomentumBase: num(r.bonusMomentum, 0), comps: [], sac: false, costs: c, npc: c.npc,
         atk: JSON.parse(JSON.stringify(r.atk)), patient: JSON.parse(JSON.stringify(r.patient)), breachSystem: r.breachSystem,
         targets: r.targets.slice(), pick: {}, applied: false, extendedId: r.mode === "task" ? r.extendedId : "",
+        opposeFor: r.mode === "opposed" && A.tok(r.opposeId) ? { id: r.opposeId, name: A.tok(r.opposeId).name } : null,
         extra: { severity: 0, damage: 0, devastating: 0, shields: 0, stressFix: 0, progress: 0 }
       };
       res.bonusFromWeapon = function () {
@@ -1826,26 +1869,20 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var r = S.r, jobs = [], lib = {};
     if (res.mode === "task") {
       if (res.assists.length) {
-        var all = JSON.parse(JSON.stringify(S.lib.Assists || {}));
-        var used = res.assists.map(function (a) { return a.id; });
-        all[t.id] = (all[t.id] || []).filter(function (a) { return used.indexOf(a.id) < 0; });
-        if (!all[t.id].length) delete all[t.id];
-        lib.Assists = all;
+        var used = {}; used[t.id] = res.assists.map(function (a) { return a.id; });
+        jobs.push(A.changeAssists(null, used));
       }
       if (r.applyMods && num((S.lib.DiffOneTime || {}).value, 0)) lib.DiffOneTime = { value: 0, reason: "" };
       if (res.opposed) lib.Opposed = null;
     }
-    if (res.mode === "opposed") {
-      lib.Opposed = { value: res.ev.successes, fromId: t.id, fromName: t.name, action: res.action ? res.action.name : "", at: Date.now() };
-    }
+    if (res.mode === "opposed") lib.Opposed = A.opposedEntry(res, t);
     if (res.mode === "assist") {
-      var bank = JSON.parse(JSON.stringify(S.lib.Assists || {}));
+      var bank = {};
       res.targets.filter(Boolean).forEach(function (tid) {
-        if (!bank[tid]) bank[tid] = [];
-        bank[tid].push({ id: A.uid(), fromId: t.id, fromName: t.name, attr: res.attr, dept: res.dept, focus: res.focus,
-          tn: res.tn, critMax: res.critMax, dice: res.dice, at: Date.now() });
+        bank[tid] = [{ id: A.uid(), fromId: t.id, fromName: t.name, attr: res.attr, dept: res.dept, focus: res.focus,
+          tn: res.tn, critMax: res.critMax, dice: res.dice, at: Date.now() }];
       });
-      lib.Assists = bank;
+      jobs.push(A.changeAssists(bank, null));
     }
     if (Object.keys(lib).length) jobs.push(A.saveLib(lib));
     var action = res.action, ps = attackingShip() || A.activeShip();
@@ -1909,7 +1946,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       jobs.push(A.chat(A.card(res.name + ": re-roll", source === "determination" ? "Moment of Inspiration (1 Determination)" : "free re-roll",
         [A.diceHtml(res.ev.leaderDice, res.name), res.mode === "task" ? "<b>" + res.ev.successes + " vs " + res.difficulty + ": " +
           (res.success ? "SUCCESS" : "FAILURE") + "</b>" : "<b>" + res.ev.successes + " successes</b>"], "#6fa8ff")));
-      if (res.mode === "opposed") jobs.push(A.saveLib({ Opposed: { value: res.ev.successes, fromId: res.tokenId, fromName: res.name, action: res.action ? res.action.name : "", at: Date.now() } }));
+      if (res.mode === "opposed") jobs.push(A.saveLib({ Opposed: A.opposedEntry(res, t) }));
       return Promise.all(jobs);
     }).then(A.render).catch(A.fail);
   };
@@ -1980,6 +2017,17 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       A.chat(A.card(opp.fromName + " wins the opposed task", "", [opp.fromName + " gains " + m + " Momentum" + (from && A.isNPC(from) ? " (added to Threat)" : "") + "."], "#ff9b9b"));
       A.render();
     }).catch(A.fail);
+  };
+
+  /* ---------------- opposed tasks (p.256) ----------------
+   * The reactive side's successes set the Difficulty. When it names who it's against, only that roller picks it up.
+   */
+  A.opposedEntry = function (res, t) {
+    return { value: res.ev.successes, fromId: t.id, fromName: t.name, action: res.action ? res.action.name : "", at: Date.now(),
+      forId: res.opposeFor ? res.opposeFor.id : "", forName: res.opposeFor ? res.opposeFor.name : "" };
+  };
+  A.opposedFor = function (opp, tokenId) {
+    return !!opp && opp.value !== undefined && opp.fromId !== tokenId && (!opp.forId || opp.forId === tokenId);
   };
 
   /* ---------------- effects ---------------- */
@@ -2274,7 +2322,13 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     // mode-specific block
     if (r.mode === "assist") out.push(assistTargets(t, action));
     if (r.mode === "task") out.push(taskBlock(t, action));
-    if (r.mode === "opposed") out.push(h("div", { class: "notice info" }, "Roll first, before the attacker. Your successes become their Difficulty. They'll see it applied automatically on their next roll."));
+    if (r.mode === "opposed") {
+      var foes = S.order.map(A.tok).filter(function (x) { return x && x.isSTA && x.id !== t.id; });
+      out.push(h("div", { class: "notice info" }, "Roll first, before the attacker. Your successes become their Difficulty, applied automatically on their next roll.",
+        h("label", { class: "field", style: "margin-top:6px" }, "Against",
+          A.select(r.opposeId, [{ value: "", label: "Whoever rolls next" }].concat(foes.map(function (x) { return { value: x.id, label: x.name }; })),
+            function (v) { r.opposeId = v; A.render(); }))));
+    }
 
     out.push(diceBlock(t));
 
@@ -2324,9 +2378,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var p = S.lib.DiffPersistent || {}, o = S.lib.DiffOneTime || {};
     if (num(p.value, 0) || num(o.value, 0)) card.appendChild(h("label", { class: "row tight small" },
       h("input", { type: "checkbox", checked: r.applyMods, onchange: function (e) { r.applyMods = e.target.checked; A.render(); } }), "Apply GM difficulty modifiers"));
-    if (opp && opp.fromId !== r.tokenId && opp.value !== undefined) card.appendChild(h("label", { class: "row tight small" },
+    if (A.opposedFor(opp, r.tokenId)) card.appendChild(h("label", { class: "row tight small" },
       h("input", { type: "checkbox", checked: r.useOpposed, onchange: function (e) { r.useOpposed = e.target.checked; A.render(); } }),
       "Opposed: " + opp.fromName + " set Difficulty " + opp.value + (opp.action ? " (" + opp.action + ")" : "")));
+    else if (opp && opp.value !== undefined && opp.forId && opp.fromId !== r.tokenId) card.appendChild(h("div", { class: "small muted" },
+      "Opposed Difficulty " + opp.value + " from " + opp.fromName + " is waiting for " + (opp.forName || "another roller") + "."));
 
     // extended task
     var xs = A.activeExtended ? A.activeExtended() : [];
@@ -2678,10 +2734,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     return list().filter(function (x) { return x.kind === "task" && !x.done && (S.ctx.isGM || !x.hidden); });
   };
 
-  function update(id, patch) {
-    var l = list().map(function (x) { return x.id === id ? Object.assign({}, x, patch) : x; });
-    return A.saveExtended(l);
-  }
+  function update(id, patch) { return A.patchExtended(id, patch); }
   function logLine(x, text) { return (x.log || []).concat([text]).slice(-12); }
 
   function trackBar(x) {
@@ -2743,17 +2796,22 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     return card;
   };
 
-  function applyProgress(res, x, impact) {
-    var adv = R.advanceTrack(x.track, x.progress, impact);
-    var rows = [res.name + " marks <b>" + adv.marked + "</b> space" + (adv.marked === 1 ? "" : "s") + ": " + adv.progress + " / " + x.track];
-    if (x.breakthroughs) adv.crossed.forEach(function (n) {
-      rows.push("<b>Breakthrough " + n + "!</b> " + A.esc((x.notes || [])[n - 1] || "The situation changes (GM describes)."));
-    });
-    if (adv.complete) rows.push('<font color="#1e7b34"><b>Extended task complete.</b></font>');
+  function applyProgress(res, x0, impact) {
     return A.applyGuard(res, "xApplied", function () {
-      return update(x.id, { progress: adv.progress, done: adv.complete, bonusNext: 0,
-        log: logLine(x, res.name + ": +" + adv.marked + " (" + adv.progress + "/" + x.track + ")") })
-        .then(function () { res.xApplied = true; return A.chat(A.card(x.name, "extended task", rows, "#6fa8ff")); });
+      // Progress others marked meanwhile counts: re-read the track before adding to it.
+      return A.refreshPools().then(function () {
+        var x = find(x0.id);
+        if (!x) throw new Error("That extended task no longer exists. Press \u27f3 to reload.");
+        var adv = R.advanceTrack(x.track, x.progress, impact);
+        var rows = [res.name + " marks <b>" + adv.marked + "</b> space" + (adv.marked === 1 ? "" : "s") + ": " + adv.progress + " / " + x.track];
+        if (x.breakthroughs) adv.crossed.forEach(function (n) {
+          rows.push("<b>Breakthrough " + n + "!</b> " + A.esc((x.notes || [])[n - 1] || "The situation changes (GM describes)."));
+        });
+        if (adv.complete) rows.push('<font color="#1e7b34"><b>Extended task complete.</b></font>');
+        return update(x.id, { progress: adv.progress, done: adv.complete, bonusNext: 0,
+          log: logLine(x, res.name + ": +" + adv.marked + " (" + adv.progress + "/" + x.track + ")") })
+          .then(function () { res.xApplied = true; return A.chat(A.card(x.name, "extended task", rows, "#6fa8ff")); });
+      });
     });
   }
 
@@ -4094,7 +4152,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         h("button", { class: "btn primary small", onclick: startMission }, "Start mission"),
         h("span", { class: "small muted" }, "Threat = 2 per PC (" + 2 * S.gmPcs + "), Momentum 0, main characters' Determination = 1")),
       h("div", { class: "row", style: "margin-top:8px" }, h("button", { class: "btn small", onclick: endScene }, "End scene"),
-        h("span", { class: "small muted" }, "-1 Momentum, ships' shields to max, Reserve Power restored, Regain attempts and ship effects cleared, one-time modifier and opposed rolls cleared."))));
+        h("span", { class: "small muted" }, "-1 Momentum, ships' shields to max, Reserve Power restored, Regain attempts and ship effects cleared, one-time modifier, opposed rolls and banked assists cleared."))));
 
     // difficulty modifiers
     function modRow(key, label) {
@@ -4109,7 +4167,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 
     // opposed + assists
     var ac = h("div", { class: "card" }, h("h3", null, "Pending"));
-    if (L.Opposed) ac.appendChild(h("div", { class: "row" }, "Opposed Difficulty " + L.Opposed.value + " set by " + L.Opposed.fromName,
+    if (L.Opposed) ac.appendChild(h("div", { class: "row" }, "Opposed Difficulty " + L.Opposed.value + " set by " + L.Opposed.fromName + (L.Opposed.forName ? " against " + L.Opposed.forName : ""),
       h("button", { class: "btn small", onclick: function () { A.saveLib({ Opposed: null }).then(A.render).catch(A.fail); } }, "Clear")));
     var ids = Object.keys(L.Assists || {});
     if (!ids.length && !L.Opposed) ac.appendChild(h("div", { class: "small muted" }, "No banked assists or opposed rolls."));
@@ -4146,13 +4204,13 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   }
 
   function endScene() {
-    var jobs = [A.addPools(-1, 0), A.saveLib({ DiffOneTime: { value: 0, reason: "" }, Opposed: null, NpcAvoidUsed: {} })];
+    var jobs = [A.addPools(-1, 0), A.saveLib({ DiffOneTime: { value: 0, reason: "" }, Opposed: null, NpcAvoidUsed: {}, Assists: {} })];
     A.ships().forEach(function (s) {
       // p.308: shields return to maximum at the start of a new scene (also when they're raised again later).
       jobs.push(A.saveToken(s, { Shields: R.shieldsMax(s.p), ShieldsLowered: "", ReservePower: 1, RegainAttempts: 0, Effects: [], ReroutedSystem: "" }));
     });
     Promise.all(jobs).then(function () {
-      return A.chat(A.card("Scene ends", "", ["Momentum -1 (now " + S.lib.Momentum + "). Ships' shields and Reserve Power restored."], "#f29c38"));
+      return A.chat(A.card("Scene ends", "", ["Momentum -1 (now " + S.lib.Momentum + "). Ships' shields and Reserve Power restored. Banked assists and opposed Difficulties cleared."], "#f29c38"));
     }).then(A.render).catch(A.fail);
   }
 
