@@ -1166,6 +1166,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     return A.api("poolAdd", { momentum: dMomentum || 0, threat: dThreat || 0, strict: strict ? 1 : 0 }).then(function (res) {
       if (res && res.Momentum !== undefined) { S.lib.Momentum = num(res.Momentum, S.lib.Momentum); S.lib.Threat = num(res.Threat, S.lib.Threat); }
       if (!res || !num(res.ok, 0)) {
+        if (A.render) A.render();   // show the real pools the macro just reported, not the out-of-date ones
         var msg = POOL_ERRORS[res && res.error] || "MapTool didn't update the pools.";
         throw new Error(msg + (res && /^notEnough/.test(res.error) ? " (Momentum " + S.lib.Momentum + ", Threat " + S.lib.Threat + ")." : ""));
       }
