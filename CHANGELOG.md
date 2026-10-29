@@ -15,6 +15,8 @@
 - `api/tokenGet`: players only get tokens on maps they can see, and Notes are blank on tokens they don't own.
 - The STA2e Remote add-on uses the same pool changes for its players' rolls, spends and banking.
 
+- Token changes worked out from current values now re-read the token from MapTool first: applying attacks, damage, Regenerate Shields, Damage Control, repairs, First Aid and healing, Avoid Injury, rests, Stress recovery, Determination spends, Reserve Power and Regain Power, ship effects, breaches, and lowering or raising shields. Before, a player's window that hadn't been reloaded could write back old values, for example undoing damage the GM had just applied.
+
 ### Error handling
 - `api/tokenSet` and `api/tokenGet` check that the token is still on the given map. If it has moved, been deleted, or its map was renamed since the window last loaded, the window now says "MapTool can't find … press ⟳" right away instead of timing out after 15 seconds.
 - Apply Injury, Apply damage, the other Apply buttons and extended-task progress only show "Applied." after MapTool has saved the change. A failed save leaves the button available, and a second click while saving does nothing.

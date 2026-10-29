@@ -1087,6 +1087,24 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     }).catch(function (e) { S.loading = false; S.error = String(e && e.message || e); });
   };
 
+  // Re-read some tokens from MapTool just before a change is worked out from their current values, so a save
+  // never puts back what someone else changed since this window last loaded (damage the GM applied, say).
+  A.refreshTokens = function (list) {
+    var seen = {}, toks = (list || []).filter(function (t) { if (!t || !t.id || seen[t.id]) return false; seen[t.id] = 1; return true; });
+    if (!toks.length) return Promise.resolve();
+    var props = A.CHAR_PROPS.concat(A.SHIP_PROPS, A.DERIVED_CHAR, A.DERIVED_SHIP, A.BUILDER_PROPS).filter(function (k, i, arr) { return arr.indexOf(k) === i; });
+    return A.api("tokenGet", { tokens: toks.map(function (t) { return { id: t.id, map: t.map }; }), props: props }).then(function (data) {
+      toks.forEach(function (t) {
+        var d = data && data[t.id];
+        if (!d) throw new Error("MapTool can't find " + t.name + " on map “" + t.map + "”. It may have moved to another map, or the map was renamed. Press ⟳ and try again.");
+        if (d.name) t.name = d.name;
+        if (d.type) { t.type = d.type; t.isShip = d.type === A.SHIP_TYPE; t.isSTA = t.isShip || d.type === A.CHAR_TYPE; }
+        t.raw = d.props || {};
+        t.p = normalize({ type: t.type, props: t.raw });
+      });
+    });
+  };
+
   A.setLib = function (raw) {
     var L = S.lib;
     L.Momentum = num(raw.Momentum, 0);
@@ -1793,11 +1811,21 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       lib.Assists = bank;
     }
     if (Object.keys(lib).length) jobs.push(A.saveLib(lib));
-    if (res.perfect) jobs.push(A.saveToken(t, { Determination: Math.max(0, t.p.Determination - 1) }));
-    if (res.shipRoll && res.shipRoll.rerouted && sh) jobs.push(A.saveToken(sh.ship, { ReroutedSystem: "" }));
     var action = res.action, ps = attackingShip() || A.activeShip();
-    if (action && ps && action.needs && action.needs.indexOf("Reserve Power") >= 0) jobs.push(A.saveToken(ps, { ReservePower: 0 }));
-    if (action && action.effect === "regainPower" && ps) jobs.push(A.saveToken(ps, { RegainAttempts: ps.p.RegainAttempts + 1 }));
+    var spendPower = !!(action && ps && action.needs && action.needs.indexOf("Reserve Power") >= 0);
+    var regain = !!(action && action.effect === "regainPower" && ps);
+    var rerouted = (res.shipRoll && res.shipRoll.rerouted && sh) ? sh.ship : null;
+    // Fresh values first, then one save per token.
+    jobs.push(A.refreshTokens([res.perfect ? t : null, rerouted, (spendPower || regain) ? ps : null]).then(function () {
+      var saves = [], ships = {};
+      function change(s, k, v) { (ships[s.id] = ships[s.id] || { s: s, ch: {} }).ch[k] = v; }
+      if (res.perfect) saves.push(A.saveToken(t, { Determination: Math.max(0, t.p.Determination - 1) }));
+      if (rerouted) change(rerouted, "ReroutedSystem", "");
+      if (spendPower) change(ps, "ReservePower", 0);
+      if (regain) change(ps, "RegainAttempts", ps.p.RegainAttempts + 1);
+      Object.keys(ships).forEach(function (id) { saves.push(A.saveToken(ships[id].s, ships[id].ch)); });
+      return Promise.all(saves);
+    }));
     jobs.push(A.chat(rollCard(res), res.npc && S.lib.Settings && S.lib.Settings.npcRollsGmOnly ? "gm" : "all"));
     return Promise.all(jobs);
   }
@@ -1839,7 +1867,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       evaluate(res);
       res.spentLog = keepSpent;
       var jobs = [];
-      if (source === "determination") jobs.push(A.saveToken(t, { Determination: t.p.Determination - 1 }));
+      if (source === "determination") jobs.push(A.refreshTokens([t]).then(function () { return A.saveToken(t, { Determination: Math.max(0, t.p.Determination - 1) }); }));
       jobs.push(A.chat(A.card(res.name + ": re-roll", source === "determination" ? "Moment of Inspiration (1 Determination)" : "free re-roll",
         [A.diceHtml(res.ev.leaderDice, res.name), res.mode === "task" ? "<b>" + res.ev.successes + " vs " + res.difficulty + ": " +
           (res.success ? "SUCCESS" : "FAILURE") + "</b>" : "<b>" + res.ev.successes + " successes</b>"], "#6fa8ff")));
@@ -1918,9 +1946,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 
   /* ---------------- effects ---------------- */
   function pushEffect(ship, key, label, extra) {
-    var eff = (ship.p.Effects || []).filter(function (e) { return e.key !== key; });
-    eff.push(Object.assign({ key: key, label: label }, extra || {}));
-    return A.saveToken(ship, { Effects: eff });
+    return A.refreshTokens([ship]).then(function () {
+      var eff = (ship.p.Effects || []).filter(function (e) { return e.key !== key; });
+      eff.push(Object.assign({ key: key, label: label }, extra || {}));
+      return A.saveToken(ship, { Effects: eff });
+    });
   }
   function takeEffect(ship, key) {
     var e = (ship.p.Effects || []).filter(function (x) { return x.key === key; })[0];
@@ -1933,24 +1963,27 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.applyPersonalAttack = function () {
     var res = S.r.result, target = A.tok(res.atk.target), w = currentPersonalWeapon();
     if (!target || !w) return A.toast("Choose a weapon and target.");
-    var piercing = R.hasQuality(w.qualities, "Piercing") || res.extra.piercing;
-    var sev = R.injurySeverity(num(w.severity, 2) + res.extra.severity, target.p.Protection, piercing);
-    var kind = w.injury === "both" ? res.atk.injury : w.injury;
-    var inj = (target.p.Injuries || []).slice();
-    var rows = [];
-    if (target.p.Kind === "Minor NPC") {
-      rows.push(A.esc(target.name) + " is <b>Defeated</b> (" + (kind === "deadly" ? "killed" : "unconscious") + ").");
-    } else {
-      inj.push({ id: A.uid(), name: w.name + (kind === "deadly" ? " wound" : " stun"), severity: sev, kind: kind, treated: false });
-      rows.push(A.esc(target.name) + " suffers a <b>" + (kind === "deadly" ? "Deadly" : "Stun") + " Injury, severity " + sev + "</b>" +
-        (target.p.Protection && !piercing ? " (after Protection " + target.p.Protection + ")" : "") + " and is Defeated.");
-      var av = R.canAvoidInjury(target.p, sev);
-      if (av.ok) rows.push("They may Avoid Injury: " + A.esc(av.reason));
-    }
     return applyGuard(res, "applied", function () {
-      return A.saveToken(target, { Injuries: inj, Defeated: 1 }).then(function () {
-        res.applied = true;
-        return A.chat(A.card(res.name + " hits " + target.name, w.name, rows, "#b3261e"));
+      // Work from the target's current Injuries and Protection, not the ones this window loaded.
+      return A.refreshTokens([target]).then(function () {
+        var piercing = R.hasQuality(w.qualities, "Piercing") || res.extra.piercing;
+        var sev = R.injurySeverity(num(w.severity, 2) + res.extra.severity, target.p.Protection, piercing);
+        var kind = w.injury === "both" ? res.atk.injury : w.injury;
+        var inj = (target.p.Injuries || []).slice();
+        var rows = [];
+        if (target.p.Kind === "Minor NPC") {
+          rows.push(A.esc(target.name) + " is <b>Defeated</b> (" + (kind === "deadly" ? "killed" : "unconscious") + ").");
+        } else {
+          inj.push({ id: A.uid(), name: w.name + (kind === "deadly" ? " wound" : " stun"), severity: sev, kind: kind, treated: false });
+          rows.push(A.esc(target.name) + " suffers a <b>" + (kind === "deadly" ? "Deadly" : "Stun") + " Injury, severity " + sev + "</b>" +
+            (target.p.Protection && !piercing ? " (after Protection " + target.p.Protection + ")" : "") + " and is Defeated.");
+          var av = R.canAvoidInjury(target.p, sev);
+          if (av.ok) rows.push("They may Avoid Injury: " + A.esc(av.reason));
+        }
+        return A.saveToken(target, { Injuries: inj, Defeated: 1 }).then(function () {
+          res.applied = true;
+          return A.chat(A.card(res.name + " hits " + target.name, w.name, rows, "#b3261e"));
+        });
       });
     });
   };
@@ -1959,6 +1992,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var res = S.r.result, target = A.tok(res.atk.target), atkShip = attackingShip(), w = currentShipWeapon();
     if (!target || !w || !atkShip) return A.toast("Choose a weapon and target ship.");
     return applyGuard(res, "applied", function () {
+    // Current shields, breaches and effects on both ships, not the ones this window loaded.
+    return A.refreshTokens([target, atkShip]).then(function () {
+    w = currentShipWeapon() || w;
     var q = w.prof.qualities, notes = [];
     var dmg = w.prof.damage + res.extra.damage;
     if (res.atk.salvo && w.raw.kind === "torpedo") { dmg += 1; notes.push("Salvo +1"); }
@@ -2010,11 +2046,14 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       });
     });
     });
+    });
   };
 
   A.applySimpleEffect = function () {
     var res = S.r.result, a = res.action, ship = attackingShip() || A.activeShip(), t = roller();
     return applyGuard(res, "applied", function () {
+    // Current shields, breaches, power and injuries, not the ones this window loaded.
+    return A.refreshTokens([ship, A.tok(res.patient.id), A.tok(res.atk.target)]).then(function () {
     var jobs = [], msg = "";
     if (a.effect === "regenShields" && ship) {
       var gain = (t.isShip ? (R.crewQualityRatings(t.p.CrewQuality || "Proficient") || { dept: 2 }).dept : t.p.Engineering) + res.extra.shields;
@@ -2063,6 +2102,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     return Promise.all(jobs).then(function () {
       res.applied = true;
       if (msg) return A.chat(A.card(res.name + ": " + a.name, "", [A.esc(msg)], "#4cc38a"));
+    });
     });
     });
   };
@@ -2485,7 +2525,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         A.select("", A.tokenOptions(chars, true), function (v) {
           var x = A.tok(v); if (!x) return;
           var n = res.extra.stressFix; res.extra.stressFix = 0;
-          A.saveToken(x, { Stress: R.recoverStress(x.p.Stress, n) }).then(function () {
+          A.refreshTokens([x]).then(function () { return A.saveToken(x, { Stress: R.recoverStress(x.p.Stress, n) }); }).then(function () {
             return A.chat(A.card(x.name + " recovers " + n + " Stress", "Momentum spend", [], "#56d0e0"));
           }).then(A.render).catch(A.fail);
         })));
@@ -3593,10 +3633,13 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       var sev = h("input", { type: "number", value: "2", min: "1", max: "9" });
       var kind = h("select", null, h("option", { value: "stun" }, "Stun"), h("option", { value: "deadly" }, "Deadly"));
       ic.appendChild(h("div", { class: "row", style: "margin-top:8px" }, nm, sev, kind, h("button", { class: "btn small", onclick: function () {
-        var s = R.injurySeverity(num(sev.value, 1), p.Protection, false);
-        var list = p.Injuries.concat([{ id: A.uid(), name: nm.value || "Injury", severity: s, kind: kind.value, treated: false }]);
-        A.saveToken(t, { Injuries: list, Defeated: p.Kind === "Minor NPC" ? 1 : 1 }).then(function () {
-          return A.chat(A.card(t.name + " is injured", "", [A.esc((nm.value || "Injury") + ", severity " + s + " (" + kind.value + "). Defeated.")], "#b3261e"));
+        var name = nm.value || "Injury", base = num(sev.value, 1), k = kind.value, s;
+        A.refreshTokens([t]).then(function () {
+          s = R.injurySeverity(base, t.p.Protection, false);
+          var list = t.p.Injuries.concat([{ id: A.uid(), name: name, severity: s, kind: k, treated: false }]);
+          return A.saveToken(t, { Injuries: list, Defeated: 1 });
+        }).then(function () {
+          return A.chat(A.card(t.name + " is injured", "", [A.esc(name + ", severity " + s + " (" + k + "). Defeated.")], "#b3261e"));
         }).then(A.render).catch(A.fail);
       } }, "Add Injury (after Protection)")));
     }
@@ -3644,43 +3687,54 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     return h("label", { class: "field" }, key, inp);
   }
 
+  // Changes worked out from current values re-read the token first (A.refreshTokens), so they never undo
+  // something another player or the GM did since this window loaded.
   function rest(t, kind) {
-    var n = kind === "sleep" ? t.p.Stress : R.recoverStress(t.p.Stress, R.REST[kind]);
-    var ns = kind === "sleep" ? 0 : n;
-    var ch = { Stress: ns };
-    if (ns < R.stressMax(t.p)) ch.FatiguedAttribute = "";
-    A.saveToken(t, ch).then(function () {
-      return A.chat(A.card(t.name + " rests", kind === "sleep" ? "Sleep" : kind === "break" ? "Break" : "Breather", ["Stress now " + ns + " / " + R.stressMax(t.p) + "."], "#56d0e0"));
+    A.refreshTokens([t]).then(function () {
+      var n = kind === "sleep" ? t.p.Stress : R.recoverStress(t.p.Stress, R.REST[kind]);
+      var ns = kind === "sleep" ? 0 : n;
+      var ch = { Stress: ns };
+      if (ns < R.stressMax(t.p)) ch.FatiguedAttribute = "";
+      return A.saveToken(t, ch).then(function () {
+        return A.chat(A.card(t.name + " rests", kind === "sleep" ? "Sleep" : kind === "break" ? "Break" : "Breather", ["Stress now " + ns + " / " + R.stressMax(t.p) + "."], "#56d0e0"));
+      });
     }).then(A.render).catch(A.fail);
   }
 
   function avoidInjury(t, inj, av) {
-    var p = t.p;
-    var list = p.Injuries.filter(function (i) { return i.id !== inj.id; });
-    var ch = { Injuries: list };
-    if (!list.length) ch.Defeated = 0;
-    var jobs = [], msg;
-    if (av.threat) {
-      if (p.Kind === "Notable NPC" && S.lib.NpcAvoidUsed[t.id]) return A.toast("This Notable NPC already avoided an injury this scene.");
-      if (S.lib.Threat < av.threat) return A.toast("Not enough Threat.");
-      jobs.push(A.addPools(0, -av.threat, true));
-      if (p.Kind === "Notable NPC") { var u = Object.assign({}, S.lib.NpcAvoidUsed); u[t.id] = 1; jobs.push(A.saveLib({ NpcAvoidUsed: u })); }
-      msg = t.name + " avoids the injury (GM spends " + av.threat + " Threat).";
-    } else {
-      var s = R.sufferStress(p.Stress, inj.severity, R.stressMax(p));
-      ch.Stress = s.stress;
-      msg = t.name + " avoids the injury by taking " + s.taken + " Stress (" + s.stress + "/" + R.stressMax(p) + ")" + (s.complication ? " and suffers a complication (Stress track full)." : ".");
-    }
-    jobs.push(A.saveToken(t, ch));
-    Promise.all(jobs).then(function () { return A.chat(A.card(t.name + ": Avoid Injury", inj.name, [A.esc(msg)], "#4cc38a")); }).then(A.render).catch(A.fail);
+    A.refreshTokens([t]).then(function () {
+      var p = t.p;
+      if (!(p.Injuries || []).some(function (i) { return i.id === inj.id; })) { A.toast(t.name + " no longer has that Injury."); return; }
+      var list = p.Injuries.filter(function (i) { return i.id !== inj.id; });
+      var ch = { Injuries: list };
+      if (!list.length) ch.Defeated = 0;
+      var jobs = [], msg;
+      if (av.threat) {
+        if (p.Kind === "Notable NPC" && S.lib.NpcAvoidUsed[t.id]) { A.toast("This Notable NPC already avoided an injury this scene."); return; }
+        if (S.lib.Threat < av.threat) { A.toast("Not enough Threat."); return; }
+        jobs.push(A.addPools(0, -av.threat, true));
+        if (p.Kind === "Notable NPC") { var u = Object.assign({}, S.lib.NpcAvoidUsed); u[t.id] = 1; jobs.push(A.saveLib({ NpcAvoidUsed: u })); }
+        msg = t.name + " avoids the injury (GM spends " + av.threat + " Threat).";
+      } else {
+        var s = R.sufferStress(p.Stress, inj.severity, R.stressMax(p));
+        ch.Stress = s.stress;
+        msg = t.name + " avoids the injury by taking " + s.taken + " Stress (" + s.stress + "/" + R.stressMax(p) + ")" + (s.complication ? " and suffers a complication (Stress track full)." : ".");
+      }
+      jobs.push(A.saveToken(t, ch));
+      return Promise.all(jobs).then(function () { return A.chat(A.card(t.name + ": Avoid Injury", inj.name, [A.esc(msg)], "#4cc38a")); });
+    }).then(A.render).catch(A.fail);
   }
   function editInjury(t, id, patch) {
-    var list = t.p.Injuries.map(function (i) { return i.id === id ? Object.assign({}, i, patch) : i; });
-    A.saveToken(t, { Injuries: list }).then(A.render).catch(A.fail);
+    A.refreshTokens([t]).then(function () {
+      var list = t.p.Injuries.map(function (i) { return i.id === id ? Object.assign({}, i, patch) : i; });
+      return A.saveToken(t, { Injuries: list });
+    }).then(A.render).catch(A.fail);
   }
   function removeInjury(t, id) {
-    var list = t.p.Injuries.filter(function (i) { return i.id !== id; });
-    A.saveToken(t, { Injuries: list }).then(A.render).catch(A.fail);
+    A.refreshTokens([t]).then(function () {
+      var list = t.p.Injuries.filter(function (i) { return i.id !== id; });
+      return A.saveToken(t, { Injuries: list });
+    }).then(A.render).catch(A.fail);
   }
 
   /* ======================= SHIP ======================= */
@@ -3735,13 +3789,16 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: !!p.ShieldsRaised, disabled: !ed, onchange: function (e) {
         // p.305: lowered shields have a maximum of 0; raised again they return to their normal maximum,
         // or to the total they had when lowered if the ship has been damaged this scene.
-        var up = e.target.checked, ch;
-        if (!up) ch = { ShieldsRaised: 0, Shields: 0, ShieldsLowered: p.Shields };
-        else {
-          var full = R.shieldsMax(Object.assign({}, p, { ShieldsRaised: 1 })), kept = num(p.ShieldsLowered, null);
-          ch = { ShieldsRaised: 1, Shields: kept === null ? full : R.clamp(kept, 0, full), ShieldsLowered: "" };
-        }
-        A.saveToken(s, ch).then(A.render).catch(A.fail); } }), "Shields raised"),
+        var up = e.target.checked;
+        A.refreshTokens([s]).then(function () {
+          var q = s.p, ch;
+          if (!up) ch = { ShieldsRaised: 0, Shields: 0, ShieldsLowered: q.Shields };
+          else {
+            var full = R.shieldsMax(Object.assign({}, q, { ShieldsRaised: 1 })), kept = num(q.ShieldsLowered, null);
+            ch = { ShieldsRaised: 1, Shields: kept === null ? full : R.clamp(kept, 0, full), ShieldsLowered: "" };
+          }
+          return A.saveToken(s, ch);
+        }).then(A.render).catch(A.fail); } }), "Shields raised"),
       h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: !!p.WeaponsArmed, disabled: !ed, onchange: function (e) { set("WeaponsArmed")(e.target.checked ? 1 : 0); } }), "Weapons armed"),
       h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: !!p.ReservePower, disabled: !ed, onchange: function (e) { set("ReservePower")(e.target.checked ? 1 : 0); } }), "Reserve Power")));
     var reroute = h("div", { class: "row", style: "margin-top:6px" }, h("span", null, "Rerouted power: " + (p.ReroutedSystem || "none")));
@@ -3758,7 +3815,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     if (!p.Effects.length) eff.appendChild(h("span", { class: "small muted" }, "none"));
     p.Effects.forEach(function (e) {
       eff.appendChild(h("span", { class: "chip on" }, e.label + (e.by ? " (" + e.by + ")" : ""), ed ? h("button", { title: "End", onclick: function () {
-        set("Effects")(p.Effects.filter(function (x) { return x.key !== e.key; })); } }, "✕") : null));
+        A.refreshTokens([s]).then(function () { return A.saveToken(s, { Effects: s.p.Effects.filter(function (x) { return x.key !== e.key; }) }); })
+          .then(A.render).catch(A.fail); } }, "✕") : null));
     });
     st.appendChild(eff);
     out.push(st);
@@ -3789,9 +3847,22 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       var b = p.Breaches[k] || { count: 0, patched: false };
       var dest = R.systemDestroyed(p, k);
       bt.appendChild(h("tr", null, h("td", null, k),
-        h("td", null, ed ? A.stepper(num(b.count, 0), function (v) { var nb = JSON.parse(JSON.stringify(p.Breaches)); if (v <= 0) delete nb[k]; else nb[k] = { count: v, patched: v > num(b.count, 0) ? false : !!b.patched }; set("Breaches")(nb); }, 0, 12) : String(b.count)),
+        h("td", null, ed ? A.stepper(num(b.count, 0), function (v) {
+          // The stepper means "one more / one fewer": apply that to the current count, not the one this window loaded.
+          var delta = v - num(b.count, 0);
+          A.refreshTokens([s]).then(function () {
+            var nb = JSON.parse(JSON.stringify(s.p.Breaches)), cur = nb[k] || { count: 0, patched: false }, n = Math.max(0, num(cur.count, 0) + delta);
+            if (n <= 0) delete nb[k]; else nb[k] = { count: n, patched: delta > 0 ? false : !!cur.patched };
+            return A.saveToken(s, { Breaches: nb });
+          }).then(A.render).catch(A.fail);
+        }, 0, 12) : String(b.count)),
         h("td", null, dest ? h("span", { style: "color:var(--red);font-weight:700" }, "DESTROYED") : b.count ? (b.patched ? "Patched" :
-          (ed ? h("button", { class: "btn small", onclick: function () { var nb = JSON.parse(JSON.stringify(p.Breaches)); nb[k].patched = true; set("Breaches")(nb); } }, "Mark patched") : "Breached")) : "OK"),
+          (ed ? h("button", { class: "btn small", onclick: function () {
+            A.refreshTokens([s]).then(function () {
+              var nb = JSON.parse(JSON.stringify(s.p.Breaches)); if (nb[k]) nb[k].patched = true;
+              return A.saveToken(s, { Breaches: nb });
+            }).then(A.render).catch(A.fail);
+          } }, "Mark patched") : "Breached")) : "OK"),
         h("td", null, b.count ? String(R.repairDifficulty(p.Breaches, k)) : "")));
     });
     bc.appendChild(bt);
@@ -3840,7 +3911,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   }
 
   function incoming(s, st) {
-    A.rollDice(2).then(function (v) {
+    A.refreshTokens([s]).then(function () { return A.rollDice(2); }).then(function (v) {
       var sys = st.system || R.systemFromD20(v[0]);
       var out = R.applyShipDamage(s.p, { damage: st.damage, piercing: st.piercing, depleting: st.depleting, highYield: st.highYield,
         extraResistance: A.hasEffect(s, "modulate") ? 2 : 0, system: sys });
