@@ -49,7 +49,7 @@ What comes across: attributes, departments, species, rank, role, values, focuses
 For the **Import…** JSON dialog, use the Foundry VTT export. Roll20 and Fantasy Grounds exports are not supported by that importer. This restriction does not apply to the native MapTool token export described above.
 
 ## Updating from 1.3 or 1.4
-Drag the new `STA2e.mtlib` onto the map (and the new `STA2e-Remote.mtlib`, if you use it). Then close any open STA 2E window on every client and open it again with `/sta`; the version next to the STA 2E badge should read 1.6.0. Importing `STA2e-TokenTypes.mtprops` again is recommended: it adds the ship's **Shields when lowered** field to the Edit Token dialog. The add-on works without it.
+Drag the new `STA2e.mtlib` onto the map (and the new `STA2e-Remote.mtlib`, if you use it). Then close any open STA 2E window on every client and open it again with `/sta`; the version next to the STA 2E badge should read 1.7.0. Importing `STA2e-TokenTypes.mtprops` again is recommended: it adds the ship's **Shields when lowered** field to the Edit Token dialog. The add-on works without it.
 
 ## Updating from 1.1
 Drag the new `STA2e.mtlib` onto the map. You don't need to import the token types again.
@@ -74,6 +74,7 @@ The sheet updates whenever something changes through the STA 2E window. If you e
 - Through the STA 2E window, players can also apply the results of their actions to other tokens: an Injury they inflict, Stress an ally recovers, damage, shields and Reserve Power on a ship. They can't change another token's ratings, talents, name or type.
 - Players can spend and save Momentum and add Threat, bank and use assists, and mark progress on extended tasks. Only the GM can spend Threat, change the GM tab settings, the active ship, Difficulty modifiers, or anything else about an extended task.
 - Players don't see the Notes of tokens they don't own.
+- Succeed at Cost is the GM's call (p.259). Players get the button only when the GM ticks **Players may choose Succeed at Cost** on the GM tab, and always for Warp and Regain Power, whose rules allow it.
 
 If the window says **"Only the GM or the token's owner can change …"**, press ⟳: the window was showing out-of-date data, or the token's owner needs to be set in Edit Token.
 

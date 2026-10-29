@@ -1,6 +1,22 @@
 # Changelog
 
-## Core 1.6.0 (unreleased)
+## Core 1.7.0 / Remote 0.6.3 (unreleased)
+
+### Character rules
+- **Recover Stress** (p.278): at most 3 Stress per task, counted across every purchase. Before, applying the recovered Stress reset the count, so more could be bought. The spend card shows how many of the 3 are used.
+- **Avoid Injury** (p.292): avoiding an Injury also prevents being Defeated by it. The character goes back to how they were before the hit, even if they still have an older Injury. Before, any remaining Injury left them Defeated. New Injuries record whether the character was already Defeated. Injuries from before this version keep the old behavior.
+- **Supporting characters with no Values** (p.291, p.347) are Defeated outright by a successful attack, like Minor NPCs, and get no Injury to avoid. Before, they got an Injury record.
+- **Succeed at Cost** (p.259) is the GM's call:
+  - The GM always gets the button.
+  - Players get it for Warp and Regain Power, whose rules allow it.
+  - Players get it on any failed task when the GM ticks **Players may choose Succeed at Cost** on the GM tab. An open result picks the change up within a few seconds.
+  - Otherwise the result says to ask the GM.
+  - Remote players follow the same setting.
+
+### Tests
+- End-to-end tests for each change: the Stress cap across purchases, Avoid Injury with an older Injury, Supporting with no Values, and Succeed at Cost for players, for Regain Power and for remote players.
+
+## Core 1.6.0
 
 ### Multiplayer
 - **Banked assists** go through a new `api/assists` macro that adds or removes individual assists, reading the current list in the same call. Before, each assist roll and each task that used assists rewrote the whole list, so two players banking at once lost one assist. A task could also wipe an assist banked after the window loaded.

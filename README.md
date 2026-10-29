@@ -28,8 +28,8 @@ The remote add-on requires a separate `api.php` relay server. The relay implemen
 
 | Location | Purpose |
 | --- | --- |
-| `src/STA2e/` | Core add-on source (1.6.0) |
-| `src/STA2e-Remote/` | Remote add-on source (0.6.2) |
+| `src/STA2e/` | Core add-on source (1.7.0) |
+| `src/STA2e-Remote/` | Remote add-on source (0.6.3) |
 | `src/STA2e-TokenTypes/` | Campaign property package source |
 | `dist/` | Installable MapTool packages |
 | `tools/build.py` | Package builder and source/package consistency check |
