@@ -294,9 +294,7 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     var shipGroup = null;
     if (spec.ship) {
       var sd = spec.ship.dice.map(function (v) { return evalDie(v, spec.ship.tn, spec.ship.critMax, compRange); });
-      var sc = count(sd, "comp");
-      if (spec.ship.rerouted) sc *= 2;  // p.185: rerouted power doubles complications
-      shipGroup = { name: spec.ship.name || "Ship", dice: sd, successes: sum(sd, "successes"), complications: sc, rerouted: !!spec.ship.rerouted };
+      shipGroup = { name: spec.ship.name || "Ship", dice: sd, successes: sum(sd, "successes"), complications: count(sd, "comp"), rerouted: !!spec.ship.rerouted };
     }
 
     // p.256: assistants' successes only count if the leader scores at least 1
@@ -309,6 +307,9 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     var complications = count(leaderDice, "comp");
     assistGroups.forEach(function (g) { complications += g.complications; });
     if (shipGroup) complications += shipGroup.complications;
+    // p.185: with Reserve Power rerouted to the assisting system, the ship's die counts as a 1 and
+    // "each complication rolled counts as two complications" (every die on the task, not just the ship's).
+    if (shipGroup && shipGroup.rerouted) complications *= 2;
 
     var difficulty = Math.max(0, int(spec.difficulty));
     var success = total >= difficulty;
@@ -1118,18 +1119,40 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       // Never write "" over an object-typed key: the data store would try to convert it and fail.
       out[k] = (v === null || v === undefined) ? {} : v;
     });
-    return A.api("libSet", { values: out });
+    return A.api("libSet", { values: out }).then(checkRefused);
   };
 
   A.saveExtended = function (list) {
     S.lib.Extended = list;
-    return A.api("libSet", { values: { Extended: { list: list } } });
+    return A.api("libSet", { values: { Extended: { list: list } } }).then(checkRefused);
   };
 
-  A.addPools = function (dMomentum, dThreat) {
-    var m = R.clamp(S.lib.Momentum + (dMomentum || 0), 0, R.MOMENTUM_CAP);
-    var t = Math.max(0, S.lib.Threat + (dThreat || 0));
-    return A.saveLib({ Momentum: m, Threat: t });
+  // The API macros refuse writes the caller isn't allowed to make (see api/libSet and api/tokenSet).
+  function checkRefused(res, what, where) {
+    if (res && res.error === "noToken") throw new Error("MapTool can't find " + (what || "that token") + (where ? " on map \u201c" + where + "\u201d" : "") +
+      ". It may have moved to another map, or the map was renamed. Press \u27f3 and try again.");
+    var refused = (res && Array.isArray(res.refused)) ? res.refused : [];
+    if (refused.length) throw new Error("Only the GM" + (what ? " or the token's owner" : "") + " can change " +
+      (what ? what + "'s " : "") + refused.join(", ") + ". Press ⟳ to reload.");
+    return res;
+  }
+
+  // Change Momentum and/or Threat by an amount. The macro reads the current pools in the same call, so
+  // players acting at the same time don't overwrite each other. strict: refuse instead of clamping at 0.
+  var POOL_ERRORS = {
+    gmOnly: "Only the GM can spend Threat.",
+    notEnoughMomentum: "Not enough Momentum in the group pool",
+    notEnoughThreat: "Not enough Threat"
+  };
+  A.addPools = function (dMomentum, dThreat, strict) {
+    return A.api("poolAdd", { momentum: dMomentum || 0, threat: dThreat || 0, strict: strict ? 1 : 0 }).then(function (res) {
+      if (res && res.Momentum !== undefined) { S.lib.Momentum = num(res.Momentum, S.lib.Momentum); S.lib.Threat = num(res.Threat, S.lib.Threat); }
+      if (!res || !num(res.ok, 0)) {
+        var msg = POOL_ERRORS[res && res.error] || "MapTool didn't update the pools.";
+        throw new Error(msg + (res && /^notEnough/.test(res.error) ? " (Momentum " + S.lib.Momentum + ", Threat " + S.lib.Threat + ")." : ""));
+      }
+      return res;
+    });
   };
 
   /* ---------------- stat-sheet display fields ----------------
@@ -1205,7 +1228,7 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     }
     var args = { id: t.id, map: t.map, props: out };
     if (newType) { args.type = newType; t.type = newType; t.isShip = newType === A.SHIP_TYPE; t.isSTA = true; }
-    return A.api("tokenSet", args);
+    return A.api("tokenSet", args).then(function (res) { return checkRefused(res, t.name, t.map); });
   };
 
   // Bring a token into the middle of the map view (e.g. one placed off-screen).
@@ -1348,6 +1371,9 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     blank1: { name: "Blank token", type: "Basic", map: "Bridge", owner: 1, props: {} }
   };
   var ctxOverride = { isGM: true };
+  var SHARED_PROPS = ["Stress", "Injuries", "Defeated", "Shields", "Breaches", "Effects", "ReservePower", "ReroutedSystem", "RegainAttempts",
+    "StressText", "StressPct", "DeterminationText", "Status", "InjuryList", "FocusList", "ShieldsText", "ShieldsPct", "Resistance", "PowerStatus", "BreachList", "EffectList"];
+  var PLAYER_LIB_KEYS = ["Assists", "Opposed", "Extended", "DiffOneTime"];
 
   function call(name, args) {
     var out;
@@ -1365,17 +1391,23 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       case "tokenGet":
         out = {};
         (args.tokens || []).forEach(function (m) {
-          var t = tokens[m.id]; if (!t) return;
+          var t = tokens[m.id]; if (!t || (m.map && t.map !== m.map)) return;   // as api/tokenGet.mts: missing tokens are left out
           var p = {}; (args.props || []).forEach(function (k) { p[k] = t.props[k] === undefined ? "" : t.props[k]; });
+          if (!ctxOverride.isGM && t.owner !== 1) p.Notes = "";   // as api/tokenGet.mts
           out[m.id] = { name: t.name, type: t.type, map: t.map, props: p };
         });
         break;
       case "tokenSet": {
+        // Same rule as api/tokenSet.mts: GM and owners write anything; other players only conflict state.
         var t = tokens[args.id];
-        if (args.type) t.type = args.type;
-        if (args.name) t.name = args.name;
-        Object.keys(args.props || {}).forEach(function (k) { t.props[k] = args.props[k]; });
-        out = { ok: 1 }; break;
+        if (!t || (args.map && t.map !== args.map)) { out = { ok: 0, error: "noToken", count: 0, refused: [] }; break; }
+        var full = ctxOverride.isGM || t.owner === 1, refused = [], written = 0;
+        if (args.type) { if (full) t.type = args.type; else refused.push("type"); }
+        if (args.name) { if (full) t.name = args.name; else refused.push("name"); }
+        Object.keys(args.props || {}).forEach(function (k) {
+          if (full || SHARED_PROPS.indexOf(k) >= 0) { t.props[k] = args.props[k]; written++; } else refused.push(k);
+        });
+        out = { ok: refused.length ? 0 : 1, count: written, refused: refused }; break;
       }
       case "tokenCreate": {
         if (root.MockTypes === 0) { out = { ok: 0, error: "noType", type: args.type }; break; }
@@ -1391,14 +1423,30 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       }
       case "libGet":
         out = {}; (args.keys || []).forEach(function (k) { out[k] = lib[k] === undefined ? "" : lib[k]; }); break;
-      case "libSet":
+      case "libSet": {
         // Like MapTool's data store: once a key holds an object/array, it can't be overwritten with a scalar.
+        // Same rule as api/libSet.mts for which keys players may write.
+        var refusedKeys = [];
         Object.keys(args.values || {}).forEach(function (k) {
           var old = lib[k], nv = args.values[k];
+          var allowed = ctxOverride.isGM || (PLAYER_LIB_KEYS.indexOf(k) >= 0 && (k !== "DiffOneTime" || Number((nv || {}).value) === 0));
+          if (!allowed) { refusedKeys.push(k); return; }
           if (old !== undefined && old !== null && typeof old === "object" && typeof nv !== "object") throw new Error("data store type mismatch on " + k);
           lib[k] = nv;
         });
-        out = { ok: 1 }; break;
+        out = { ok: refusedKeys.length ? 0 : 1, refused: refusedKeys }; break;
+      }
+      case "poolAdd": {
+        // Mirrors api/poolAdd.mts.
+        var m0 = Number(lib.Momentum) || 0, t0 = Number(lib.Threat) || 0;
+        var dm = Number(args.momentum) || 0, dt = Number(args.threat) || 0, err = "";
+        if (dt < 0 && !ctxOverride.isGM) err = "gmOnly";
+        if (args.strict && m0 + dm < 0) err = "notEnoughMomentum";
+        if (args.strict && t0 + dt < 0) err = "notEnoughThreat";
+        var m1 = err ? m0 : Math.min(Math.max(m0 + dm, 0), 6), t1 = err ? t0 : Math.max(t0 + dt, 0);
+        if (!err) { lib.Momentum = m1; lib.Threat = t1; }
+        out = { ok: err ? 0 : 1, error: err, Momentum: m1, Threat: t1, dMomentum: m1 - m0, dThreat: t1 - t0 }; break;
+      }
       case "roll": {
         var forced = root.MockDice || [];
         out = []; for (var i = 0; i < (args.n || 1); i++) out.push(forced.length ? forced.shift() : 1 + Math.floor(Math.random() * 20));
@@ -1746,7 +1794,9 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       total = Math.max(0, total);
       var n = Math.min(R.MAX_DICE, 2 + bonusDice + buy), rollN = perfect ? n - 1 : n;
       var shipRolls = sh && !sh.rerouted ? 1 : 0;   // a Reserve Power reroute makes the ship's die a 1 without rolling
-      return A.rollDice(rollN + shipRolls).then(function (vals) {
+      // Pay for the bought dice before rolling, as a change to the pools (see the STA 2E add-on's api/poolAdd).
+      var pay = cost ? A.addPools(payThreat ? 0 : -cost, payThreat ? cost : 0, true) : Promise.resolve();
+      return pay.then(function () { return A.rollDice(rollN + shipRolls); }).then(function (vals) {
         vals = (vals || []).map(function (v) { return num(v, 20); });
         var dice = vals.slice(0, rollN);
         if (perfect) dice.unshift(1);
@@ -1760,9 +1810,8 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
         };
         evalOpen(res);
         touch(res);
-        var lib = { Momentum: R.clamp(S.lib.Momentum - (payThreat ? 0 : cost), 0, R.MOMENTUM_CAP), Threat: S.lib.Threat + (payThreat ? cost : 0) };
-        if (usedOneTime) lib.DiffOneTime = { value: 0, reason: "" };
-        var jobs = [A.saveLib(lib)];
+        var jobs = [];
+        if (usedOneTime) jobs.push(A.saveLib({ DiffOneTime: { value: 0, reason: "" } }));
         if (perfect) jobs.push(A.saveToken(t, { Determination: Math.max(0, p.Determination - 1) }));
         if (sh && sh.rerouted) jobs.push(A.saveToken(sh.ship, { ReroutedSystem: "" }));
         jobs.push(A.chat(rollCardHtml(res)));
@@ -1781,14 +1830,13 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     var res = X.open[cid];
     if (!res) return Promise.resolve(null);
     delete X.open[cid];
-    return A.refreshPools().then(function () {
+    var bank = res.rollLeft > 0 ? A.addPools(res.rollLeft, 0) : Promise.resolve(null);
+    return bank.then(function (pool) {
       var rows = [], jobs = [];
       if (res.spentLog.length) rows.push("Spent: " + esc(res.spentLog.join(", ")));
-      var b = R.bankMomentum(S.lib.Momentum, res.rollLeft);
-      res.banked = b.added; res.lost = b.lost;
+      res.banked = pool ? num(pool.dMomentum, 0) : 0; res.lost = Math.max(0, res.rollLeft - res.banked);
       if (res.rollLeft > 0) {
-        jobs.push(A.saveLib({ Momentum: b.pool }));
-        rows.push(b.added + " Momentum saved to the group pool" + (b.lost ? " (" + b.lost + " lost: pool is full at " + R.MOMENTUM_CAP + ")" : "") + ".");
+        rows.push(res.banked + " Momentum saved to the group pool" + (res.lost ? " (" + res.lost + " lost: pool is full at " + R.MOMENTUM_CAP + ")" : "") + ".");
       }
       if (res.bonusLeft > 0) rows.push(res.bonusLeft + " bonus Momentum unspent (can't be saved).");
       var avoided = res.comps.filter(function (c) { return c === "bought"; }).length, stand = res.comps.length - avoided;
@@ -1863,14 +1911,17 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
         if (!target || !allies().some(function (a) { return a.id === target.id; })) throw new Error("Pick who recovers the Stress.");
         if (target.p.Stress < 1) throw new Error(target.name + " has no Stress to recover.");
       }
+      var left = 0, fromBonus = 0, fromRoll = 0;
       return A.refreshPools().then(function () {
         if (res.bonusLeft + res.rollLeft + S.lib.Momentum < sp.cost) throw new Error("Not enough Momentum for " + sp.label + ".");
-        var left = sp.cost, fromBonus = Math.min(res.bonusLeft, left); res.bonusLeft -= fromBonus; left -= fromBonus;
-        var fromRoll = Math.min(res.rollLeft, left); res.rollLeft -= fromRoll; left -= fromRoll;
+        fromBonus = Math.min(res.bonusLeft, sp.cost); fromRoll = Math.min(res.rollLeft, sp.cost - fromBonus); left = sp.cost - fromBonus - fromRoll;
+        // Take any shortfall from the group pool first; only record the spend once it has been paid.
+        return left > 0 ? A.addPools(-left, 0, true) : null;
+      }).then(function () {
+        res.bonusLeft -= fromBonus; res.rollLeft -= fromRoll;
         var what = sp.label + (target ? " (" + target.name + ")" : "");
         res.spentLog.push(what + " (" + sp.cost + ")");
         var jobs = [];
-        if (left > 0) jobs.push(A.addPools(-left, 0));
         if (target) {
           res.stressFixed = (res.stressFixed || 0) + 1;
           jobs.push(A.saveToken(target, { Stress: R.recoverStress(target.p.Stress, 1) }));
