@@ -918,7 +918,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.NS = "net.wizardsgate.sta2e";
   A.CHAR_TYPE = "STA2e Character";
   A.SHIP_TYPE = "STA2e Ship";
-  A.VERSION = "1.3.0";
+  A.VERSION = "1.4.0";
 
   A.CHAR_PROPS = R.ATTRIBUTES.concat(R.DEPARTMENTS, ["Kind", "Species", "Rank", "Role", "Focuses", "Values", "Talents",
     "Stress", "StressBonus", "Determination", "Injuries", "Defeated", "FatiguedAttribute", "Protection", "Weapons", "Traits", "Notes",
@@ -1740,6 +1740,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       var ps = attackingShip() || A.activeShip();
       if (ps && !ps.p.ReservePower) return A.toast(action.name + " needs Reserve Power. Use Regain Power first.");
     }
+    if (action && action.effect === "regenShields") {
+      var rs = attackingShip() || A.activeShip();
+      // Lowered shields have a maximum of 0 (p.305), so regenerating them would only waste the Reserve Power.
+      if (rs && !rs.p.ShieldsRaised) return A.toast(rs.name + "'s shields are lowered. Raise them first (Tactical → Prepare, or Shields raised on the Ship tab).");
+    }
     if (action && action.effect === "personalAttack" && !r.atk.target) return A.toast("Choose the target of the attack.");
     if (action && action.effect === "shipAttack" && !r.atk.target) return A.toast("Choose the target ship.");
 
@@ -2540,6 +2545,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var card = h("div", { class: "card" }, h("h3", null, "Apply result"));
     if (res.applied) { card.appendChild(h("div", { class: "notice info" }, "Applied.")); return card; }
     if (res.appliedBusy) { card.appendChild(h("div", { class: "notice info" }, "Saving…")); return card; }
+    var spendFirst = { shipAttack: "+1 Damage and Devastating Attack", personalAttack: "+1 Severity", regenShields: "+2 Shields" }[a.effect];
+    if (spendFirst) card.appendChild(h("div", { class: "small muted", style: "margin-bottom:4px" },
+      "Buy " + spendFirst + " under Spend Momentum first: they're counted when you press Apply."));
     if (a.effect === "personalAttack") {
       var tg = A.tok(res.atk.target), w = currentPersonalWeapon();
       card.appendChild(h("div", { class: "row" }, h("span", null, "Inflict a " + (w && w.injury === "both" ? res.atk.injury : (w ? w.injury : "")) + " Injury (severity " + (w ? w.severity : "?") +
@@ -4038,7 +4046,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var mp = h("span", { class: "pips" });
     for (var i = 1; i <= R.MOMENTUM_CAP; i++) mp.appendChild(h("span", { class: "pip" + (i <= L.Momentum ? " on" : "") }));
     return h("div", { class: "top" },
-      h("div", { class: "brand" }, "STA 2E"),
+      h("div", { class: "brand", title: "Star Trek Adventures 2E add-on " + A.VERSION }, "STA 2E", h("span", { style: "font-size:9px;font-weight:400;opacity:.75;margin-left:5px" }, A.VERSION)),
       h("div", { class: "pools" },
         h("div", { class: "pool mom", title: "Group Momentum (max 6)" }, h("span", { class: "lbl" }, "Momentum"), mp, h("span", { class: "val" }, String(L.Momentum))),
         h("div", { class: "pool thr", title: "Threat" }, h("span", { class: "lbl" }, "Threat"), h("span", { class: "val" }, String(L.Threat))),
@@ -4078,6 +4086,14 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     window.scrollTo(0, y);
   };
 
+  // The few tokens the current tab shows: the character and ship being looked at, the roller, the assisting
+  // ship and the target. Re-read every few seconds; the rest reload with ⟳.
+  A.shownTokens = function () {
+    var r = S.r || {}, ids = [S.charId, S.shipId, r.tokenId, r.ship && r.ship.id, r.atk && r.atk.target, r.patient && r.patient.id];
+    var list = ids.map(A.tok).concat([A.activeShip()]), seen = {};
+    return list.filter(function (t) { if (!t || seen[t.id]) return false; seen[t.id] = 1; return true; });
+  };
+
   A.reload = function () {
     return A.loadAll().then(function () {
       if (!S.r || !A.tok(S.r.tokenId)) A.newRoll(A.defaultRoller());
@@ -4095,11 +4111,19 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       A.render();
       return A.reload();
     });
-    // keep pools fresh for everyone (other players roll too)
+    // Keep the pools and the tokens on screen fresh for everyone (other players and the GM change them too).
+    // Skipped while a roll result is open or while typing, so nothing is redrawn under the cursor.
     setInterval(function () {
       if (A.busy || (S.r && S.r.result)) return;
-      var before = S.lib.Momentum + "/" + S.lib.Threat;
-      A.refreshPools().then(function () { if (S.lib.Momentum + "/" + S.lib.Threat !== before) A.render(); }).catch(function () {});
+      var ae = document.activeElement, tag = ae && ae.tagName;
+      if ((tag === "INPUT" && ae.type !== "checkbox") || tag === "TEXTAREA" || tag === "SELECT") return;
+      var shown = A.shownTokens();
+      var before = S.lib.Momentum + "/" + S.lib.Threat + JSON.stringify(shown.map(function (t) { return t.raw; }));
+      Promise.all([A.refreshPools(), A.refreshTokens(shown).catch(function () {})]).then(function () {
+        if (A.busy || (S.r && S.r.result)) return;
+        var after = S.lib.Momentum + "/" + S.lib.Threat + JSON.stringify(shown.map(function (t) { return t.raw; }));
+        if (after !== before) A.render();
+      }).catch(function () {});
     }, 6000);
   };
 
