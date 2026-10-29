@@ -280,9 +280,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var shipGroup = null;
     if (spec.ship) {
       var sd = spec.ship.dice.map(function (v) { return evalDie(v, spec.ship.tn, spec.ship.critMax, compRange); });
-      var sc = count(sd, "comp");
-      if (spec.ship.rerouted) sc *= 2;  // p.185: rerouted power doubles complications
-      shipGroup = { name: spec.ship.name || "Ship", dice: sd, successes: sum(sd, "successes"), complications: sc, rerouted: !!spec.ship.rerouted };
+      shipGroup = { name: spec.ship.name || "Ship", dice: sd, successes: sum(sd, "successes"), complications: count(sd, "comp"), rerouted: !!spec.ship.rerouted };
     }
 
     // p.256: assistants' successes only count if the leader scores at least 1
@@ -295,6 +293,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var complications = count(leaderDice, "comp");
     assistGroups.forEach(function (g) { complications += g.complications; });
     if (shipGroup) complications += shipGroup.complications;
+    // p.185: with Reserve Power rerouted to the assisting system, the ship's die counts as a 1 and
+    // "each complication rolled counts as two complications" (every die on the task, not just the ship's).
+    if (shipGroup && shipGroup.rerouted) complications *= 2;
 
     var difficulty = Math.max(0, int(spec.difficulty));
     var success = total >= difficulty;
@@ -669,7 +670,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       ship: { system: "Engines", dept: "Conn" },
       desc: "Carefully control the ship's flight. Difficulty 0; normally used to generate Momentum for crossing difficult terrain." },
     { id: "helm_ram", group: "Helm", type: "major", name: "Ram", roll: true, attr: "Daring", dept: "Conn", diff: 2, effect: "ram",
-      ship: { system: "Engines", dept: "Conn" }, needs: ["Reserve Power", "Prepare minor action"],
+      ship: { system: "Engines", dept: "Conn" },
       desc: "Move into Contact with an enemy in Close range. On success inflict your collision damage (Scale + half zones moved, Devastating, Piercing, Intense) but suffer the target's collision damage in return." },
     { id: "helm_warp", group: "Helm", type: "major", name: "Warp", roll: true, attr: "Control", dept: "Conn", diff: 1, effect: "warp",
       ship: { system: "Engines", dept: "Conn" }, needs: ["Reserve Power", "Prepare minor action"], sac: true,
@@ -696,7 +697,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       ship: { system: "Structure", dept: "Engineering" }, needs: ["Reserve Power"], diffNote: "2, +1 if shields are at 0",
       desc: "Reroute Reserve Power to the shield emitters. On success the ship regains shields equal to your Engineering, plus 2 per Momentum spent (Repeatable)." },
     { id: "ops_reroute", group: "Operations", type: "major", name: "Reroute Power", roll: false, effect: "reroute", needs: ["Reserve Power"],
-      desc: "Reroute Reserve Power to one system. The next time that system assists a task, its assist die counts as a 1, but each complication on it counts double." },
+      desc: "Reroute Reserve Power to one system. The next time that system assists a task, its assist die counts as a 1, but each complication rolled on that task counts as two." },
     { id: "ops_transport", group: "Operations", type: "major", name: "Transport", roll: true, attr: "Control", dept: "Engineering", diff: 2, diffNote: "Transporter Difficulty +1 from the bridge",
       ship: { system: "Sensors", dept: "Engineering" },
       desc: "Remotely operate the ship's transporters. Operating them from the bridge increases the Difficulty by 1." },
@@ -923,7 +924,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     "Stress", "StressBonus", "Determination", "Injuries", "Defeated", "FatiguedAttribute", "Protection", "Weapons", "Traits", "Notes",
     "TalentInfo", "TraitInfo"]);
   A.SHIP_PROPS = R.SYSTEMS.concat(R.DEPARTMENTS, ["Class", "Registry", "Scale", "Shields", "ShieldsBonus", "ResistanceBonus",
-    "ShieldsRaised", "WeaponsArmed", "ReservePower", "ReroutedSystem", "RegainAttempts", "Breaches", "ShipWeapons",
+    "ShieldsRaised", "ShieldsLowered", "WeaponsArmed", "ReservePower", "ReroutedSystem", "RegainAttempts", "Breaches", "ShipWeapons",
     "CrewQuality", "Effects", "Traits", "Talents", "TractorStrength", "Notes", "TalentInfo", "TraitInfo"]);
   // Extra properties on tokens exported from the STA character builder for MapTool (converted on load).
   A.BUILDER_PROPS = ["BuilderExport", "Edition", "Pronouns", "Assignment", "Reputation", "StressMax", "Resistance", "PersonalThreat",
@@ -997,6 +998,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       R.DEPARTMENTS.forEach(function (k) { p[k] = num(p[k], 1); });
       p.Scale = num(p.Scale, 4); p.ShieldsBonus = num(p.ShieldsBonus, 0); p.ResistanceBonus = num(p.ResistanceBonus, 0);
       p.ShieldsRaised = num(p.ShieldsRaised, 1); p.WeaponsArmed = num(p.WeaponsArmed, 0);
+      // Shields total when they were lowered this scene (p.305: raising restores it). null = restore to maximum.
+      p.ShieldsLowered = num(p.ShieldsLowered, null);
       p.ReservePower = num(p.ReservePower, 1); p.RegainAttempts = num(p.RegainAttempts, 0);
       p.TractorStrength = num(p.TractorStrength, Math.max(1, p.Scale - 1));
       p.ReroutedSystem = p.ReroutedSystem || ""; p.CrewQuality = p.CrewQuality || "";
@@ -1116,18 +1119,38 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       // Never write "" over an object-typed key: the data store would try to convert it and fail.
       out[k] = (v === null || v === undefined) ? {} : v;
     });
-    return A.api("libSet", { values: out });
+    return A.api("libSet", { values: out }).then(checkRefused);
   };
 
   A.saveExtended = function (list) {
     S.lib.Extended = list;
-    return A.api("libSet", { values: { Extended: { list: list } } });
+    return A.api("libSet", { values: { Extended: { list: list } } }).then(checkRefused);
   };
 
-  A.addPools = function (dMomentum, dThreat) {
-    var m = R.clamp(S.lib.Momentum + (dMomentum || 0), 0, R.MOMENTUM_CAP);
-    var t = Math.max(0, S.lib.Threat + (dThreat || 0));
-    return A.saveLib({ Momentum: m, Threat: t });
+  // The API macros refuse writes the caller isn't allowed to make (see api/libSet and api/tokenSet).
+  function checkRefused(res, what) {
+    var refused = (res && Array.isArray(res.refused)) ? res.refused : [];
+    if (refused.length) throw new Error("Only the GM" + (what ? " or the token's owner" : "") + " can change " +
+      (what ? what + "'s " : "") + refused.join(", ") + ". Press ⟳ to reload.");
+    return res;
+  }
+
+  // Change Momentum and/or Threat by an amount. The macro reads the current pools in the same call, so
+  // players acting at the same time don't overwrite each other. strict: refuse instead of clamping at 0.
+  var POOL_ERRORS = {
+    gmOnly: "Only the GM can spend Threat.",
+    notEnoughMomentum: "Not enough Momentum in the group pool",
+    notEnoughThreat: "Not enough Threat"
+  };
+  A.addPools = function (dMomentum, dThreat, strict) {
+    return A.api("poolAdd", { momentum: dMomentum || 0, threat: dThreat || 0, strict: strict ? 1 : 0 }).then(function (res) {
+      if (res && res.Momentum !== undefined) { S.lib.Momentum = num(res.Momentum, S.lib.Momentum); S.lib.Threat = num(res.Threat, S.lib.Threat); }
+      if (!res || !num(res.ok, 0)) {
+        var msg = POOL_ERRORS[res && res.error] || "MapTool didn't update the pools.";
+        throw new Error(msg + (res && /^notEnough/.test(res.error) ? " (Momentum " + S.lib.Momentum + ", Threat " + S.lib.Threat + ")." : ""));
+      }
+      return res;
+    });
   };
 
   /* ---------------- stat-sheet display fields ----------------
@@ -1203,7 +1226,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     }
     var args = { id: t.id, map: t.map, props: out };
     if (newType) { args.type = newType; t.type = newType; t.isShip = newType === A.SHIP_TYPE; t.isSTA = true; }
-    return A.api("tokenSet", args);
+    return A.api("tokenSet", args).then(function (res) { return checkRefused(res, t.name); });
   };
 
   // Bring a token into the middle of the map view (e.g. one placed off-screen).
@@ -1346,6 +1369,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     blank1: { name: "Blank token", type: "Basic", map: "Bridge", owner: 1, props: {} }
   };
   var ctxOverride = { isGM: true };
+  var SHARED_PROPS = ["Stress", "Injuries", "Defeated", "Shields", "Breaches", "Effects", "ReservePower", "ReroutedSystem", "RegainAttempts",
+    "StressText", "StressPct", "DeterminationText", "Status", "InjuryList", "FocusList", "ShieldsText", "ShieldsPct", "Resistance", "PowerStatus", "BreachList", "EffectList"];
+  var PLAYER_LIB_KEYS = ["Assists", "Opposed", "Extended", "DiffOneTime"];
 
   function call(name, args) {
     var out;
@@ -1365,15 +1391,19 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         (args.tokens || []).forEach(function (m) {
           var t = tokens[m.id]; if (!t) return;
           var p = {}; (args.props || []).forEach(function (k) { p[k] = t.props[k] === undefined ? "" : t.props[k]; });
+          if (!ctxOverride.isGM && t.owner !== 1) p.Notes = "";   // as api/tokenGet.mts
           out[m.id] = { name: t.name, type: t.type, map: t.map, props: p };
         });
         break;
       case "tokenSet": {
-        var t = tokens[args.id];
-        if (args.type) t.type = args.type;
-        if (args.name) t.name = args.name;
-        Object.keys(args.props || {}).forEach(function (k) { t.props[k] = args.props[k]; });
-        out = { ok: 1 }; break;
+        // Same rule as api/tokenSet.mts: GM and owners write anything; other players only conflict state.
+        var t = tokens[args.id], full = ctxOverride.isGM || t.owner === 1, refused = [], written = 0;
+        if (args.type) { if (full) t.type = args.type; else refused.push("type"); }
+        if (args.name) { if (full) t.name = args.name; else refused.push("name"); }
+        Object.keys(args.props || {}).forEach(function (k) {
+          if (full || SHARED_PROPS.indexOf(k) >= 0) { t.props[k] = args.props[k]; written++; } else refused.push(k);
+        });
+        out = { ok: refused.length ? 0 : 1, count: written, refused: refused }; break;
       }
       case "tokenCreate": {
         if (root.MockTypes === 0) { out = { ok: 0, error: "noType", type: args.type }; break; }
@@ -1389,14 +1419,30 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       }
       case "libGet":
         out = {}; (args.keys || []).forEach(function (k) { out[k] = lib[k] === undefined ? "" : lib[k]; }); break;
-      case "libSet":
+      case "libSet": {
         // Like MapTool's data store: once a key holds an object/array, it can't be overwritten with a scalar.
+        // Same rule as api/libSet.mts for which keys players may write.
+        var refusedKeys = [];
         Object.keys(args.values || {}).forEach(function (k) {
           var old = lib[k], nv = args.values[k];
+          var allowed = ctxOverride.isGM || (PLAYER_LIB_KEYS.indexOf(k) >= 0 && (k !== "DiffOneTime" || Number((nv || {}).value) === 0));
+          if (!allowed) { refusedKeys.push(k); return; }
           if (old !== undefined && old !== null && typeof old === "object" && typeof nv !== "object") throw new Error("data store type mismatch on " + k);
           lib[k] = nv;
         });
-        out = { ok: 1 }; break;
+        out = { ok: refusedKeys.length ? 0 : 1, refused: refusedKeys }; break;
+      }
+      case "poolAdd": {
+        // Mirrors api/poolAdd.mts.
+        var m0 = Number(lib.Momentum) || 0, t0 = Number(lib.Threat) || 0;
+        var dm = Number(args.momentum) || 0, dt = Number(args.threat) || 0, err = "";
+        if (dt < 0 && !ctxOverride.isGM) err = "gmOnly";
+        if (args.strict && m0 + dm < 0) err = "notEnoughMomentum";
+        if (args.strict && t0 + dt < 0) err = "notEnoughThreat";
+        var m1 = err ? m0 : Math.min(Math.max(m0 + dm, 0), 6), t1 = err ? t0 : Math.max(t0 + dt, 0);
+        if (!err) { lib.Momentum = m1; lib.Threat = t1; }
+        out = { ok: err ? 0 : 1, error: err, Momentum: m1, Threat: t1, dMomentum: m1 - m0, dThreat: t1 - t0 }; break;
+      }
       case "roll": {
         var forced = root.MockDice || [];
         out = []; for (var i = 0; i < (args.n || 1); i++) out.push(forced.length ? forced.shift() : 1 + Math.floor(Math.random() * 20));
@@ -1444,7 +1490,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       bonusDice: 0, bonusMomentum: 0, buy: [0, 0, 0], perfect: false,
       ship: { use: false, id: "", system: "", dept: "" },
       excluded: {}, extraPay: "momentum", targets: [],
-      atk: { weapon: "", injury: "stun", target: "", salvo: false, zones: 0, system: "" },
+      atk: { weapon: "", injury: "stun", target: "", salvo: false, zones: 0, system: "", aos: "spread" },
       patient: { id: "", injury: "" }, breachSystem: "", extendedId: "",
       result: null
     };
@@ -1592,6 +1638,16 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     if (!w) return null;
     return { raw: w, prof: R.weaponProfile(s.p, w) };
   }
+  // Area and Spread for a ship attack. Arrays (p.228) and torpedo salvos (p.229) give "Area or Spread",
+  // chosen by the attacker when the attack is made; atk.aos holds that choice.
+  function attackQualities(atk, w) {
+    var q = w ? w.prof.qualities : [];
+    var choose = R.hasQuality(q, "Area or Spread") || (!!atk.salvo && !!w && w.raw.kind === "torpedo");
+    var pick = atk.aos === "area" ? "area" : "spread";
+    var plainArea = q.some(function (x) { return /^area$/i.test(String(x).trim()); });
+    return { choose: choose, pick: pick, spread: R.hasQuality(q, "Spread") || (choose && pick === "spread"), area: plainArea || (choose && pick === "area") };
+  }
+  A.attackQualities = attackQualities;
 
   function costs(t) {
     var r = S.r, npc = A.isNPC(t), action = actionById(r.actionId);
@@ -1670,7 +1726,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var needShip = sh && r.mode !== "assist" && !sh.rerouted;
     var total = rollN + (needShip ? 1 : 0);
     A.busy = true; A.render();
-    return (total > 0 ? A.rollDice(total) : Promise.resolve([])).then(function (vals) {
+    // Pay for bought dice, extra assistants and escalation before rolling (p.260), as a change to the pools:
+    // if another player has just spent the Momentum, the roll stops here instead of overwriting their spend.
+    var dM = c.npc ? 0 : -c.momentum, dT = c.npc ? -c.threatSpend : c.threatAdd;
+    var pay = (dM || dT) ? A.addPools(dM, dT, true) : Promise.resolve();
+    return pay.then(function () { return total > 0 ? A.rollDice(total) : []; }).then(function (vals) {
       vals = (vals || []).map(function (v) { return num(v, 20); });
       var dice = vals.slice(0, rollN);
       if (r.perfect) dice.unshift(1);
@@ -1688,7 +1748,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         bonusMomentumBase: num(r.bonusMomentum, 0), comps: [], sac: false, costs: c, npc: c.npc,
         atk: JSON.parse(JSON.stringify(r.atk)), patient: JSON.parse(JSON.stringify(r.patient)), breachSystem: r.breachSystem,
         targets: r.targets.slice(), pick: {}, applied: false, extendedId: r.mode === "task" ? r.extendedId : "",
-        extra: { severity: 0, damage: 0, devastating: false, shields: 0, stressFix: 0, progress: 0 }
+        extra: { severity: 0, damage: 0, devastating: 0, shields: 0, stressFix: 0, progress: 0 }
       };
       res.bonusFromWeapon = function () {
         var a = res.action;
@@ -1702,12 +1762,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       .catch(function (e) { A.busy = false; A.render(); A.fail(e); });
   };
 
-  // Pay costs, consume Determination / assists / reroute / one-time modifier, post to chat.
+  // Consume Determination / assists / reroute / one-time modifier, post to chat. (Costs were paid in doRoll.)
   function commitRoll(res, t, sh) {
-    var r = S.r, jobs = [], c = res.costs, lib = {};
-    var mom = S.lib.Momentum - (c.npc ? 0 : c.momentum);
-    var thr = S.lib.Threat + (c.npc ? -c.threatSpend : c.threatAdd);
-    lib.Momentum = R.clamp(mom, 0, R.MOMENTUM_CAP); lib.Threat = Math.max(0, thr);
+    var r = S.r, jobs = [], lib = {};
     if (res.mode === "task") {
       if (res.assists.length) {
         var all = JSON.parse(JSON.stringify(S.lib.Assists || {}));
@@ -1731,7 +1788,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       });
       lib.Assists = bank;
     }
-    jobs.push(A.saveLib(lib));
+    if (Object.keys(lib).length) jobs.push(A.saveLib(lib));
     if (res.perfect) jobs.push(A.saveToken(t, { Determination: Math.max(0, t.p.Determination - 1) }));
     if (res.shipRoll && res.shipRoll.rerouted && sh) jobs.push(A.saveToken(sh.ship, { ReroutedSystem: "" }));
     var action = res.action, ps = attackingShip() || A.activeShip();
@@ -1789,13 +1846,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 
   A.buyOffComplication = function (i) {
     var res = S.r.result;
-    if (res.npc) {
-      if (S.lib.Threat < R.COMPLICATION_BUYOFF) return A.toast("Not enough Threat to buy off an NPC complication.");
+    if (res.npc && S.lib.Threat < R.COMPLICATION_BUYOFF) return A.toast("Not enough Threat to buy off an NPC complication.");
+    return A.addPools(0, res.npc ? -R.COMPLICATION_BUYOFF : R.COMPLICATION_BUYOFF, true).then(function () {
       res.comps[i] = "bought";
-      return A.addPools(0, -R.COMPLICATION_BUYOFF).then(A.render);
-    }
-    res.comps[i] = "bought";
-    return A.addPools(0, R.COMPLICATION_BUYOFF).then(A.render);
+      A.render();
+    }).catch(A.fail);
   };
 
   A.succeedAtCost = function () {
@@ -1812,33 +1867,37 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.spend = function (label, cost, after) {
     var res = S.r.result;
     if (momentumAvailable(res) < cost) return A.toast("Not enough Momentum for " + label + ".");
-    var left = cost, fromBonus = Math.min(res.bonusLeft, left); res.bonusLeft -= fromBonus; left -= fromBonus;
-    var fromRoll = Math.min(res.rollLeft, left); res.rollLeft -= fromRoll; left -= fromRoll;
-    res.spentLog.push(label + " (" + cost + ")");
-    if (after) after(res);
-    if (left > 0) return (res.npc ? A.addPools(0, -left) : A.addPools(-left, 0)).then(A.render);
-    A.render();
+    var fromBonus = Math.min(res.bonusLeft, cost), fromRoll = Math.min(res.rollLeft, cost - fromBonus), left = cost - fromBonus - fromRoll;
+    // Take any shortfall from the pool first; only record the spend once the pool has paid.
+    var pay = left > 0 ? (res.npc ? A.addPools(0, -left, true) : A.addPools(-left, 0, true)) : Promise.resolve();
+    return pay.then(function () {
+      res.bonusLeft -= fromBonus; res.rollLeft -= fromRoll;
+      res.spentLog.push(label + " (" + cost + ")");
+      if (after) after(res);
+      A.render();
+    }).catch(A.fail);
   };
 
   A.finishRoll = function () {
-    var res = S.r.result, jobs = [], rows = [];
-    if (res.spentLog.length) rows.push("Spent: " + A.esc(res.spentLog.join(", ")));
-    var leftover = res.rollLeft;
-    if (leftover > 0) {
-      if (res.npc) { jobs.push(A.addPools(0, leftover)); rows.push(leftover + " unspent Momentum added to Threat."); }
-      else {
-        var b = R.bankMomentum(S.lib.Momentum, leftover);
-        jobs.push(A.saveLib({ Momentum: b.pool }));
-        rows.push(b.added + " Momentum saved to the group pool" + (b.lost ? " (" + b.lost + " lost: pool is full at " + R.MOMENTUM_CAP + ")" : "") + ".");
+    var res = S.r.result, leftover = res.rollLeft;
+    var bank = leftover > 0 ? (res.npc ? A.addPools(0, leftover) : A.addPools(leftover, 0)) : Promise.resolve(null);
+    bank.then(function (pool) {
+      var rows = [];
+      if (res.spentLog.length) rows.push("Spent: " + A.esc(res.spentLog.join(", ")));
+      if (leftover > 0) {
+        if (res.npc) rows.push(leftover + " unspent Momentum added to Threat.");
+        else {
+          var added = pool ? num(pool.dMomentum, 0) : 0, lost = leftover - added;
+          rows.push(added + " Momentum saved to the group pool" + (lost ? " (" + lost + " lost: pool is full at " + R.MOMENTUM_CAP + ")" : "") + ".");
+        }
       }
-    }
-    if (res.bonusLeft > 0) rows.push(res.bonusLeft + " bonus Momentum unspent (can't be saved).");
-    var bought = res.comps.filter(function (c) { return c === "bought"; }).length;
-    var accepted = res.comps.length - bought;
-    if (bought) rows.push(bought + " complication" + (bought > 1 ? "s" : "") + (res.npc ? " bought off with Threat." : " bought off (+" + bought * 2 + " Threat)."));
-    if (accepted) rows.push(accepted + " complication" + (accepted > 1 ? "s" : "") + " for the GM to apply.");
-    if (rows.length) jobs.push(A.chat(A.card(res.name + ": outcome", res.action ? res.action.name : "", rows, "#56d0e0")));
-    Promise.all(jobs).then(function () { A.newRoll(res.tokenId); A.render(); }).catch(A.fail);
+      if (res.bonusLeft > 0) rows.push(res.bonusLeft + " bonus Momentum unspent (can't be saved).");
+      var bought = res.comps.filter(function (c) { return c === "bought"; }).length;
+      var accepted = res.comps.length - bought;
+      if (bought) rows.push(bought + " complication" + (bought > 1 ? "s" : "") + (res.npc ? " bought off with Threat." : " bought off (+" + bought * 2 + " Threat)."));
+      if (accepted) rows.push(accepted + " complication" + (accepted > 1 ? "s" : "") + " for the GM to apply.");
+      return rows.length ? A.chat(A.card(res.name + ": outcome", res.action ? res.action.name : "", rows, "#56d0e0")) : null;
+    }).then(function () { A.newRoll(res.tokenId); A.render(); }).catch(A.fail);
   };
 
   A.giveReactiveMomentum = function () {
@@ -1846,7 +1905,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var m = R.opposedReactiveMomentum(res.difficulty, res.ev.successes);
     var from = A.tok(opp.fromId);
     res.reactiveGiven = true;
-    var p = (from && A.isNPC(from)) ? A.addPools(0, m) : A.saveLib({ Momentum: R.bankMomentum(S.lib.Momentum, m).pool });
+    var p = (from && A.isNPC(from)) ? A.addPools(0, m) : A.addPools(m, 0);
     p.then(function () {
       A.chat(A.card(opp.fromName + " wins the opposed task", "", [opp.fromName + " gains " + m + " Momentum" + (from && A.isNPC(from) ? " (added to Threat)" : "") + "."], "#ff9b9b"));
       A.render();
@@ -1904,7 +1963,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var extraRes = A.hasEffect(target, "modulate") ? 2 : 0;
     var comps = res.comps.filter(function (c) { return c !== "bought"; }).length;
     var chosen = (tsol && res.atk.system) ? res.atk.system : "";
-    return A.rollDice(3).then(function (v) {
+    var aq = attackQualities(res.atk, w);
+    if (aq.choose) notes.push(aq.pick === "area" ? "Area" : "Spread");
+    var nDev = res.extra.devastating || 0;
+    // d20s: [0] system hit, [1] shaken result, [2..] one extra system per Devastating Attack.
+    return A.rollDice(2 + nDev).then(function (v) {
       var sys = chosen || R.systemFromD20(v[0]);
       var out = R.applyShipDamage(target.p, { damage: dmg, piercing: piercing, depleting: R.hasQuality(q, "Depleting"),
         highYield: R.hasQuality(q, "High Yield"), extraResistance: extraRes, complications: comps, system: sys });
@@ -1916,19 +1979,20 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       rows.push("Shields " + out.shieldsBefore + " &rarr; " + shields + " / " + R.shieldsMax(target.p));
       out.notes.forEach(function (n) { rows.push(A.esc(n)); });
       if (out.breaches) rows.push("<b>" + out.breaches + " breach" + (out.breaches > 1 ? "es" : "") + " to " + sys + "</b>" + (chosen ? " (Targeting Solution)" : " (d20: " + v[0] + ")"));
-      if (res.extra.devastating) {
-        var sys2 = R.systemFromD20(v[1]);
+      // p.307: each Devastating Attack hits another rolled system for half the attack's damage, rounded up.
+      for (var di = 0; di < nDev; di++) {
+        var sys2 = R.systemFromD20(v[2 + di]);
         var half = Math.ceil(dmg / 2);
         var tmp = Object.assign({}, target.p, { Shields: shields });
         var out2 = R.applyShipDamage(tmp, { damage: half, piercing: piercing, highYield: R.hasQuality(q, "High Yield"), extraResistance: extraRes, system: sys2 });
         shields = out2.shieldsAfter;
         breaches = R.addBreaches(breaches, sys2, out2.breaches);
-        rows.push("Devastating Attack: " + sys2 + " takes " + out2.final + " (shields &rarr; " + shields + ")" + (out2.breaches ? ", <b>" + out2.breaches + " breach(es)</b>" : ""));
+        rows.push("Devastating Attack" + (nDev > 1 ? " " + (di + 1) : "") + ": " + sys2 + " takes " + out2.final + " (shields &rarr; " + shields + ")" + (out2.breaches ? ", <b>" + out2.breaches + " breach(es)</b>" : ""));
         out.shakenCount += out2.shakenCount;
       }
       if (out.shakenCount) {
-        var sh = A.isNPC(target) ? R.shakenFromD20(1) : R.shakenFromD20(v[2]);
-        rows.push("<b>Shaken:</b> " + A.esc(sh.name) + " " + A.esc(sh.effect) + (A.isNPC(target) ? " (NPC ships always Brace for Impact)" : " (d20: " + v[2] + ")"));
+        var sh = A.isNPC(target) ? R.shakenFromD20(1) : R.shakenFromD20(v[1]);
+        rows.push("<b>Shaken:</b> " + A.esc(sh.name) + " " + A.esc(sh.effect) + (A.isNPC(target) ? " (NPC ships always Brace for Impact)" : " (d20: " + v[1] + ")"));
       }
       var np = Object.assign({}, target.p, { Breaches: breaches });
       R.SYSTEMS.forEach(function (s) { if (R.systemDestroyed(np, s) && !R.systemDestroyed(target.p, s)) rows.push("<b>" + s + " DESTROYED.</b>"); });
@@ -2129,7 +2193,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
           A.select(r.ship.system, R.SYSTEMS, function (v) { r.ship.system = v; A.render(); }),
           A.select(r.ship.dept || r.dept, R.DEPARTMENTS, function (v) { r.ship.dept = v; A.render(); }),
           sh ? h("span", { class: "chip" }, "TN " + sh.tn + " · crit 1-" + sh.critMax) : null,
-          sh && sh.rerouted ? h("span", { class: "chip on" }, "Reserve Power: die = 1, complications x2") : null));
+          sh && sh.rerouted ? h("span", { class: "chip on" }, "Reserve Power: die = 1, all complications x2") : null));
         if (sh && sh.destroyed) sc.appendChild(h("div", { class: "notice bad" }, sh.system + " is destroyed. Tasks it would assist automatically fail."));
         else if (sh && sh.breaches && !sh.patched) sc.appendChild(h("div", { class: "notice" }, sh.system + " has " + sh.breaches + " unpatched breach(es). The GM may raise the Difficulty."));
       }
@@ -2181,6 +2245,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         else row.appendChild(h("label", { class: "field" }, "Weapon", A.select(r.atk.weapon || wl[0].name, wl.map(function (x) {
           var p = R.weaponProfile(me.p, x); return { value: x.name, label: p.name + " (" + p.damage + " dmg, " + p.range + ")" }; }), function (v) { r.atk.weapon = v; A.render(); })));
         if (action.weaponKind === "torpedo") row.appendChild(h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: r.atk.salvo, onchange: function (e) { r.atk.salvo = e.target.checked; A.render(); } }), "Salvo (+1 dmg, Area or Spread, 3 Threat)"));
+        if (sw && attackQualities(r.atk, sw).choose) row.appendChild(h("label", { class: "field" }, "Area or Spread", A.select(attackQualities(r.atk, sw).pick, [
+          { value: "spread", label: "Spread: Devastating Attack 1 Momentum, repeatable" },
+          { value: "area", label: "Area: extra targets in the zone, 1 Momentum each" }], function (v) { r.atk.aos = v; A.render(); })));
         if (sw && R.hasQuality(sw.prof.qualities, "Cumbersome")) box.appendChild(h("div", { class: "small muted" }, "Cumbersome: +1 Difficulty."));
         if (sw) box.appendChild(h("div", { class: "small muted" }, sw.prof.qualities.map(qualityHint).join(" · ") || "No special qualities"));
       }
@@ -2363,12 +2430,19 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     function b(label, cost, fn, disabled) {
       btns.appendChild(h("button", { class: "btn small", disabled: disabled, onclick: function () { A.spend(label, cost, fn); } }, label + " (" + cost + ")"));
     }
-    var intense = false, spread = false, depleting = false;
-    if (a && a.effect === "shipAttack") { var w = currentShipWeapon(); if (w) { intense = R.hasQuality(w.prof.qualities, "Intense"); spread = R.hasQuality(w.prof.qualities, "Spread") || res.atk.salvo; depleting = R.hasQuality(w.prof.qualities, "Depleting"); } }
+    var intense = false, spread = false, area = false, depleting = false;
+    if (a && a.effect === "shipAttack") {
+      var w = currentShipWeapon();
+      if (w) { var aq = attackQualities(res.atk, w); intense = R.hasQuality(w.prof.qualities, "Intense"); spread = aq.spread; area = aq.area; depleting = R.hasQuality(w.prof.qualities, "Depleting"); }
+    }
     if (a && a.effect === "personalAttack") { var pw = currentPersonalWeapon(); if (pw) intense = R.hasQuality(pw.qualities, "Intense"); }
     if (a && a.effect === "shipAttack") {
+      var nDev = res.extra.devastating || 0;
       b("+1 Damage", (intense || depleting) ? 1 : 2, function (r) { r.extra.damage += 1; }, res.applied);
-      b("Devastating Attack", spread ? 1 : 2, function (r) { r.extra.devastating = true; }, res.applied || res.extra.devastating);
+      // p.227: Spread makes the Devastating Attack spend cost 1 and Repeatable; otherwise it's bought once.
+      b("Devastating Attack" + (nDev ? " #" + (nDev + 1) : ""), spread ? 1 : 2, function (r) { r.extra.devastating = (r.extra.devastating || 0) + 1; },
+        res.applied || (!spread && nDev >= 1));
+      if (area) b("Extra target (Area)", 1, null, res.applied);
     }
     if (a && a.effect === "personalAttack") {
       b("+1 Severity", intense ? 1 : 2, function (r) { r.extra.severity += 1; }, res.applied || res.extra.severity >= 2);
@@ -2525,7 +2599,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     });
     if (adv.complete) rows.push('<font color="#b3261e"><b>The consequence comes to pass.</b></font>');
     var jobs = [update(x.id, { progress: adv.progress, done: adv.complete, log: logLine(x, "Triggered: +" + adv.marked) })];
-    if (threat) jobs.push(A.addPools(0, -threat));
+    if (threat) jobs.push(A.addPools(0, -threat, true));
     Promise.all(jobs).then(function () { return A.chat(A.card(x.name, "consequence", rows, "#b3261e"), x.hidden ? "gm" : "all"); })
       .then(A.render).catch(A.fail);
   }
@@ -3566,7 +3640,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     if (av.threat) {
       if (p.Kind === "Notable NPC" && S.lib.NpcAvoidUsed[t.id]) return A.toast("This Notable NPC already avoided an injury this scene.");
       if (S.lib.Threat < av.threat) return A.toast("Not enough Threat.");
-      jobs.push(A.addPools(0, -av.threat));
+      jobs.push(A.addPools(0, -av.threat, true));
       if (p.Kind === "Notable NPC") { var u = Object.assign({}, S.lib.NpcAvoidUsed); u[t.id] = 1; jobs.push(A.saveLib({ NpcAvoidUsed: u })); }
       msg = t.name + " avoids the injury (GM spends " + av.threat + " Threat).";
     } else {
@@ -3636,7 +3710,14 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       ed ? A.stepper(p.Shields, set("Shields"), 0, mx) : null,
       ed ? h("button", { class: "btn small", onclick: function () { set("Shields")(mx); } }, "Full shields") : null,
       h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: !!p.ShieldsRaised, disabled: !ed, onchange: function (e) {
-        var up = e.target.checked; var ch = { ShieldsRaised: up ? 1 : 0 }; if (!up) ch.Shields = 0; else ch.Shields = R.shieldsMax(Object.assign({}, p, { ShieldsRaised: 1 }));
+        // p.305: lowered shields have a maximum of 0; raised again they return to their normal maximum,
+        // or to the total they had when lowered if the ship has been damaged this scene.
+        var up = e.target.checked, ch;
+        if (!up) ch = { ShieldsRaised: 0, Shields: 0, ShieldsLowered: p.Shields };
+        else {
+          var full = R.shieldsMax(Object.assign({}, p, { ShieldsRaised: 1 })), kept = num(p.ShieldsLowered, null);
+          ch = { ShieldsRaised: 1, Shields: kept === null ? full : R.clamp(kept, 0, full), ShieldsLowered: "" };
+        }
         A.saveToken(s, ch).then(A.render).catch(A.fail); } }), "Shields raised"),
       h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: !!p.WeaponsArmed, disabled: !ed, onchange: function (e) { set("WeaponsArmed")(e.target.checked ? 1 : 0); } }), "Weapons armed"),
       h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: !!p.ReservePower, disabled: !ed, onchange: function (e) { set("ReservePower")(e.target.checked ? 1 : 0); } }), "Reserve Power")));
@@ -3644,7 +3725,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     if (ed && p.ReservePower) reroute.appendChild(A.select("", [{ value: "", label: "— Reroute Power to… —" }].concat(R.SYSTEMS), function (v) {
       if (!v) return;
       A.saveToken(s, { ReservePower: 0, ReroutedSystem: v }).then(function () {
-        return A.chat(A.card(s.name + ": Reroute Power", "", ["Reserve Power rerouted to <b>" + v + "</b>. Its next assist die counts as a 1; complications on it count double."], "#b69ae0"));
+        return A.chat(A.card(s.name + ": Reroute Power", "", ["Reserve Power rerouted to <b>" + v + "</b>. Its next assist die counts as a 1, but every complication on that task counts double."], "#b69ae0"));
       }).then(A.render).catch(A.fail);
     }));
     reroute.appendChild(h("span", { class: "small muted" }, "Regain Power attempts this scene: " + p.RegainAttempts));
@@ -3845,9 +3926,10 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   }
 
   function endScene() {
-    var jobs = [A.saveLib({ Momentum: Math.max(0, S.lib.Momentum - 1), DiffOneTime: { value: 0, reason: "" }, Opposed: null, NpcAvoidUsed: {} })];
+    var jobs = [A.addPools(-1, 0), A.saveLib({ DiffOneTime: { value: 0, reason: "" }, Opposed: null, NpcAvoidUsed: {} })];
     A.ships().forEach(function (s) {
-      jobs.push(A.saveToken(s, { Shields: R.shieldsMax(s.p), ReservePower: 1, RegainAttempts: 0, Effects: [], ReroutedSystem: "" }));
+      // p.308: shields return to maximum at the start of a new scene (also when they're raised again later).
+      jobs.push(A.saveToken(s, { Shields: R.shieldsMax(s.p), ShieldsLowered: "", ReservePower: 1, RegainAttempts: 0, Effects: [], ReroutedSystem: "" }));
     });
     Promise.all(jobs).then(function () {
       return A.chat(A.card("Scene ends", "", ["Momentum -1 (now " + S.lib.Momentum + "). Ships' shields and Reserve Power restored."], "#f29c38"));

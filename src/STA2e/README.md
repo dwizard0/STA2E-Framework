@@ -19,6 +19,8 @@ The argument can be `roll`, `actions`, `character`, `ship` or `gm` to open a spe
 Token data lives on tokens with the **STA2e Character** and **STA2e Ship** property types (import `STA2e-TokenTypes.mtprops`).
 Shared data (Momentum, Threat, banked assists, modifiers) is stored in the add-on's data store.
 
+Players can edit the tokens they own, and apply the results of their actions (Injuries, Stress, ship damage, shields and power) to other tokens through the window. Only the GM can spend Threat or change settings and modifiers. Players don't see the Notes of tokens they don't own.
+
 Hovering over an STA2e token shows the **STA 2E Character** / **STA 2E Starship** stat sheet.
 
 ## Importing from the character builder

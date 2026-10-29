@@ -409,6 +409,13 @@
               <displayName>Shields raised</displayName>
             </net.rptools.maptool.model.TokenProperty>
             <net.rptools.maptool.model.TokenProperty>
+              <name>ShieldsLowered</name>
+              <highPriority>false</highPriority>
+              <ownerOnly>false</ownerOnly>
+              <gmOnly>false</gmOnly>
+              <displayName>Shields when lowered</displayName>
+            </net.rptools.maptool.model.TokenProperty>
+            <net.rptools.maptool.model.TokenProperty>
               <name>WeaponsArmed</name>
               <highPriority>false</highPriority>
               <ownerOnly>false</ownerOnly>
