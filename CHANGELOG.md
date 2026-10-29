@@ -1,5 +1,20 @@
 # Changelog
 
+## Core 1.5.0 (unreleased)
+
+### Ship combat rules
+- **Shaken** (p.308-309): for a player ship, the commanding officer now picks the result. The damage leaves a "Shaken: pick a result" effect, and the Ship tab offers Brace for Impact!, Losing Power!, Casualties and Minor Damage, or Roll d20. A roll of 19-20 rolls again. Before, the result was rolled at random and a 19-20 just said "Roll Again". Several Shaken results from one attack stack up to be picked one at a time.
+- Shaken results now take effect:
+  - **Brace for Impact!** adds an effect, and the Roll tab warns when someone aboard tries a major action.
+  - **Losing Power!** removes Reserve Power and makes the next Regain Power +1 Difficulty. The penalty is used up by that attempt.
+  - **Casualties** tells the GM to add a complication.
+- NPC ships always Brace for Impact, and that's now applied as an effect instead of only described.
+- **Dampening** (p.227): a hit from a Dampening weapon removes the target's Reserve Power. The Ship tab's Incoming damage tool has a Dampening box for GM attacks.
+- **Cumbersome** (p.227): attacking with a Cumbersome ship weapon adds +1 to the Difficulty. Before, this was only shown as text. A Cumbersome torpedo can't be fired as a salvo, so the salvo box is disabled for it.
+
+### Tests
+- New rules tests for the Shaken table and the 50%/25% thresholds, and end-to-end tests for each change above.
+
 ## Remote 0.6.2 (unreleased)
 
 - The remote page's action list is in step with the core page again: Ram no longer lists Reserve Power and a Prepare minor action as requirements, and Reroute Power's description matches the core rule fix.

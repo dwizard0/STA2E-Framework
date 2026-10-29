@@ -46,6 +46,31 @@ test("reroute: no complications rolled stays 0", (R) => {
   assert.strictEqual(ev.complications, 0);
 });
 
+// ---- Shaken (p.308-309) ----
+test("Shaken table: 1-6 Brace, 7-12 Losing Power, 13-18 Casualties, 19-20 Roll Again", (R) => {
+  assert.deepStrictEqual([1, 6, 7, 12, 13, 18, 19, 20].map((d) => R.shakenFromD20(d).key),
+    ["brace", "brace", "power", "power", "casualties", "casualties", "again", "again"]);
+});
+test("Shaken: a picked result matches the table", (R) => {
+  ["brace", "power", "casualties"].forEach((k) => assert.strictEqual(R.shakenResult(k).key, k));
+});
+test("ship damage: crossing 50% shakes once; crossing 25% on the same attack is a breach instead", (R) => {
+  const ship = { Structure: 9, Security: 3, Scale: 4, Shields: 16, ShieldsRaised: 1 };
+  const max = R.shieldsMax(ship);
+  const half = R.applyShipDamage(Object.assign({}, ship, { Shields: max }), { damage: Math.ceil(max * 0.6) + R.resistance(ship) });
+  assert.strictEqual(half.shakenCount, 1);
+  assert.strictEqual(half.breaches, 0);
+  const deep = R.applyShipDamage(Object.assign({}, ship, { Shields: max }), { damage: max - 1 + R.resistance(ship) });
+  assert.strictEqual(deep.shakenCount, 1);
+  assert.strictEqual(deep.breaches, 1);
+});
+test("ship damage: Depleting can't cause Shaken (p.227)", (R) => {
+  const ship = { Structure: 9, Security: 3, Scale: 4, Shields: 16, ShieldsRaised: 1 };
+  const max = R.shieldsMax(ship);
+  const out = R.applyShipDamage(Object.assign({}, ship, { Shields: max }), { damage: Math.ceil(max * 0.6) + R.resistance(ship), depleting: true });
+  assert.strictEqual(out.shakenCount, 0);
+});
+
 // ---- Momentum pool (p.261) ----
 test("Momentum cap is 6", (R) => {
   assert.strictEqual(R.MOMENTUM_CAP, 6);

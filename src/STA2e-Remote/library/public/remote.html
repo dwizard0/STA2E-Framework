@@ -514,6 +514,8 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     if (v <= 18) return { key: "casualties", name: "Casualties and Minor Damage", effect: "The ship suffers a complication." };
     return { key: "again", name: "Roll Again", effect: "Roll on this table again." };
   }
+  // The result the commanding officer picks (p.309): "brace", "power" or "casualties".
+  function shakenResult(key) { return shakenFromD20({ brace: 1, power: 7, casualties: 13 }[key] || 20); }
 
   function breachCount(breaches) {
     var n = 0;
@@ -618,7 +620,7 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     injurySeverity: injurySeverity, canAvoidInjury: canAvoidInjury, isDying: isDying, treatmentDifficulty: treatmentDifficulty,
     ratingBonus: ratingBonus, resistance: resistance, shieldsMax: shieldsMax, breakthroughPoints: breakthroughPoints,
     weaponProfile: weaponProfile, hasQuality: hasQuality, versatile: versatile,
-    systemFromD20: systemFromD20, shakenFromD20: shakenFromD20,
+    systemFromD20: systemFromD20, shakenFromD20: shakenFromD20, shakenResult: shakenResult,
     breachCount: breachCount, systemDestroyed: systemDestroyed, criticalDamage: criticalDamage,
     applyShipDamage: applyShipDamage, addBreaches: addBreaches, repairDifficulty: repairDifficulty,
     collisionDamage: collisionDamage, crewQualityRatings: crewQualityRatings,
