@@ -1,6 +1,12 @@
 # Changelog
 
-## Core 1.4.0 / Remote 0.6.1 (unreleased)
+## Core 1.4.1 (unreleased)
+
+- The Momentum and Threat shown in the header and on the Spend Momentum card now stay current while a roll result is open. Before, they only updated after leaving the result.
+- If a spend, bought die, complication buy-off, consequence or Avoid Injury looks unaffordable from the pools on screen, the window re-reads the pools and tries again before refusing. Before, an out-of-date display could refuse a spend the pool could cover.
+- The GM tab's Momentum and Threat steppers change the pools by +1 / −1 instead of writing a total, so they don't undo a player's spend made a moment earlier.
+
+## Core 1.4.0 / Remote 0.6.1
 
 ### Rules fixes
 - Reroute Power: every complication rolled on the task now counts as two (Core p.185). Before, only the ship's die was doubled, and that die is always a 1, so nothing doubled.
