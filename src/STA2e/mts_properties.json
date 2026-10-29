@@ -10,6 +10,8 @@
     { "filename": "public/api/libGet.mts", "description": "STA2e internal API: read shared data" },
     { "filename": "public/api/libSet.mts", "description": "STA2e internal API: write shared data" },
     { "filename": "public/api/poolAdd.mts", "description": "STA2e internal API: change Momentum and Threat by an amount" },
+    { "filename": "public/api/assists.mts", "description": "STA2e internal API: bank or use assists" },
+    { "filename": "public/api/extendedPatch.mts", "description": "STA2e internal API: change one extended task" },
     { "filename": "public/api/roll.mts", "description": "STA2e internal API: roll dice" },
     { "filename": "public/api/chat.mts", "description": "STA2e internal API: post to chat" }
   ]

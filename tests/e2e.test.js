@@ -307,6 +307,59 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     M.tokens.ship1.props.ShipWeapons = JSON.stringify([{ kind: "energy", type: "Phaser", delivery: "Arrays", name: "Phaser Arrays" }, { kind: "torpedo", type: "Photon", name: "Photon Torpedoes" }]);
     ["ship1", "ship2"].forEach(id => { const p = M.tokens[id].props; p.Effects = "[]"; p.ReservePower = 1; p.RegainAttempts = 0; p.Breaches = "{}"; });
     M.tokens.ship1.props.Shields = 16; await A.reload(); S.tab = "roll";
+
+    // ---- 12. Shared data: assists, opposed target, extended progress, End Scene ----
+    M.ctx.isGM = false; M.lib.Opposed = null; await A.reload();
+    // Another player banked an assist for Vale a moment ago; this window hasn't seen it.
+    M.lib.Assists = { pc1: [{ id: "other", fromId: "npc1", fromName: "Someone", attr: "Control", dept: "Command", tn: 10, critMax: 1, dice: [5], at: 1 }] };
+    S.lib.Assists = {};
+    A.newRoll("pc2"); Object.assign(S.r, { mode: "assist", attr: "Control", dept: "Medicine", targets: ["pc1"] });
+    window.MockDice = [4]; await A.doRoll();
+    ok(M.lib.Assists.pc1 && M.lib.Assists.pc1.length === 2 && M.lib.Assists.pc1[0].id === "other", "banking an assist keeps one another player banked meanwhile (" + (M.lib.Assists.pc1 || []).length + " banked)");
+    S.r.result = null;
+    M.lib.Momentum = 3; await A.refreshPools();
+    M.lib.Assists.pc1.push({ id: "late", fromId: "pc2", fromName: "Dr. Yilil", attr: "Control", dept: "Medicine", tn: 10, critMax: 1, dice: [6], at: 2 });
+    A.newRoll("pc1"); Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 1 });
+    window.MockDice = [1, 2]; await A.doRoll();
+    ok(S.r.result && S.r.result.assists.length === 2, "task uses the 2 assists this window knew about");
+    ok(M.lib.Assists.pc1 && M.lib.Assists.pc1.length === 1 && M.lib.Assists.pc1[0].id === "late", "using assists removes only those, keeping one banked meanwhile");
+    A.finishRoll(); await until(() => !S.r.result);
+
+    A.newRoll("pc2"); Object.assign(S.r, { mode: "opposed", attr: "Control", dept: "Medicine", opposeId: "npc1" }); S.tab = "roll"; A.render();
+    ok(/Against/.test(document.body.textContent), "opposed roll asks who it's against");
+    window.MockDice = [1, 2]; await A.doRoll();
+    ok(M.lib.Opposed && M.lib.Opposed.forId === "npc1" && M.lib.Opposed.forName === "Jem'Hadar Soldier", "opposed Difficulty stored against the Jem'Hadar");
+    S.r.result = null;
+    A.newRoll("pc1"); Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 1 }); A.render();
+    ok(/is waiting for Jem'Hadar Soldier/.test(document.body.textContent) && !/Opposed: Dr\. Yilil/.test(document.body.textContent), "another roller doesn't pick it up");
+    A.newRoll("npc1"); Object.assign(S.r, { attr: "Control", dept: "Security" }); A.render();
+    ok(/Opposed: Dr\. Yilil set Difficulty/.test(document.body.textContent), "the named attacker picks it up");
+
+    M.ctx.isGM = true;
+    M.lib.Extended = { list: [
+      { id: "x1", kind: "task", name: "Repair the core", track: 10, progress: 0, difficulty: 1, resistance: 0, breakthroughs: false, log: [] },
+      { id: "x2", kind: "task", name: "Decode", track: 8, progress: 0, difficulty: 1, resistance: 0, breakthroughs: false, log: [] }] };
+    M.ctx.isGM = false; await A.reload();
+    M.lib.Extended.list[0].progress = 3; M.lib.Extended.list[1].name = "Decode the signal";   // meanwhile, elsewhere
+    A.startExtended("x1"); Object.assign(S.r, { tokenId: "pc1", attr: "Control", dept: "Engineering" });
+    window.MockDice = [1, 2]; await A.doRoll();
+    const mark = btn(/^Mark \d+ space/);
+    const n = mark ? Number(mark.textContent.match(/\d+/)[0]) : 0;
+    mark && mark.click(); await until(() => M.lib.Extended.list[0].progress !== 3);
+    ok(n > 0 && M.lib.Extended.list[0].progress === Math.min(10, 3 + n), "marking progress adds to what others marked meanwhile (3 + " + n + " = " + M.lib.Extended.list[0].progress + ")");
+    ok(M.lib.Extended.list[1].name === "Decode the signal", "a change to another task made meanwhile is kept");
+    r = await A.api("extendedPatch", { id: "x1", patch: { difficulty: 0 } });
+    ok(r.ok === 0 && r.refused.join() === "difficulty" && M.lib.Extended.list[0].difficulty === 1, "player can't change a task's Difficulty through extendedPatch");
+    S.r.result = null;
+
+    M.ctx.isGM = true; await A.reload();
+    M.lib.Assists = { pc1: [{ id: "old", fromId: "pc2", fromName: "Dr. Yilil", tn: 10, critMax: 1, dice: [3], at: 3 }] }; await A.refreshPools();
+    S.tab = "gm"; A.render();
+    btn(/^End scene$/).click(); await until(() => !Object.keys(M.lib.Assists || {}).length);
+    ok(!Object.keys(M.lib.Assists || {}).length && !(M.lib.Opposed && M.lib.Opposed.value !== undefined), "End Scene clears banked assists and the opposed Difficulty");
+    M.lib.Extended = { list: [] }; M.lib.Assists = {}; M.lib.Opposed = null;
+    ["ship1", "ship2"].forEach(id => { M.tokens[id].props.Effects = "[]"; });
+    await A.reload(); S.tab = "roll";
     return out;
   }, VERSION);
   results.forEach(l => console.log(l));

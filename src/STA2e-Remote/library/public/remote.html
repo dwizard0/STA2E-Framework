@@ -1449,6 +1449,28 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
         if (!err) { lib.Momentum = m1; lib.Threat = t1; }
         out = { ok: err ? 0 : 1, error: err, Momentum: m1, Threat: t1, dMomentum: m1 - m0, dThreat: t1 - t0 }; break;
       }
+      case "assists": {
+        // Mirrors api/assists.mts.
+        var all = JSON.parse(JSON.stringify(lib.Assists && typeof lib.Assists === "object" ? lib.Assists : {}));
+        Object.keys(args.add || {}).forEach(function (tid) { all[tid] = (all[tid] || []).concat(args.add[tid] || []); });
+        Object.keys(args.remove || {}).forEach(function (tid) {
+          var drop = args.remove[tid] || [];
+          var keep = (all[tid] || []).filter(function (a) { return drop.indexOf(a.id) < 0; });
+          if (keep.length) all[tid] = keep; else delete all[tid];
+        });
+        lib.Assists = all;
+        out = { ok: 1, Assists: JSON.parse(JSON.stringify(all)) }; break;
+      }
+      case "extendedPatch": {
+        // Mirrors api/extendedPatch.mts.
+        var pf = ["progress", "done", "bonusNext", "log"], patch = args.patch || {};
+        var refusedF = ctxOverride.isGM ? [] : Object.keys(patch).filter(function (f) { return pf.indexOf(f) < 0; });
+        var xl = ((lib.Extended && lib.Extended.list) || []).map(function (x) { return JSON.parse(JSON.stringify(x)); });
+        var hit = xl.filter(function (x) { return x.id === args.id; })[0];
+        var write = !!hit && !refusedF.length;
+        if (write) { Object.assign(hit, JSON.parse(JSON.stringify(patch))); lib.Extended = { list: xl }; }
+        out = { ok: write ? 1 : 0, found: hit ? 1 : 0, refused: refusedF, list: JSON.parse(JSON.stringify((lib.Extended && lib.Extended.list) || [])) }; break;
+      }
       case "roll": {
         var forced = root.MockDice || [];
         out = []; for (var i = 0; i < (args.n || 1); i++) out.push(forced.length ? forced.shift() : 1 + Math.floor(Math.random() * 20));
