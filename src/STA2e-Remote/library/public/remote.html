@@ -1919,9 +1919,13 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
 
     if (act === "sac") {
       if (res.success || res.sac) throw new Error("Succeed at Cost is only for a failed task.");
-      res.sac = true;
-      evalOpen(res);
-      return done(["succeeds at cost", "The task succeeds with one extra complication. No Momentum."], "#ff9b9b");
+      // p.259: the GM may allow Succeed at Cost; for remote players that's the GM tab setting.
+      return A.refreshPools().then(function () {
+        if (!(S.lib.Settings && S.lib.Settings.sacPlayers)) throw new Error("Succeed at Cost is the GM's call. Ask the GM to turn on \u201cPlayers may choose Succeed at Cost\u201d in GM \u2192 Settings.");
+        res.sac = true;
+        evalOpen(res);
+        return done(["succeeds at cost", "The task succeeds with one extra complication. No Momentum."], "#ff9b9b");
+      });
     }
 
     if (act === "spend") {

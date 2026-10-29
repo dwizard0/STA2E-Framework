@@ -360,6 +360,63 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     M.lib.Extended = { list: [] }; M.lib.Assists = {}; M.lib.Opposed = null;
     ["ship1", "ship2"].forEach(id => { M.tokens[id].props.Effects = "[]"; });
     await A.reload(); S.tab = "roll";
+
+    // ---- 13. Characters: Recover Stress cap, Avoid Injury and Defeated, Supporting without Values, Succeed at Cost ----
+    const pick = (sel, value) => { sel.value = value; sel.dispatchEvent(new Event("change", { bubbles: true })); };
+    M.lib.Momentum = 6; M.tokens.pc2.props.Stress = 5; await A.reload();
+    A.newRoll("pc1"); Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 1 }); S.tab = "roll"; A.render();
+    window.MockDice = [1, 2]; await A.doRoll();
+    for (let i = 1; i <= 2; i++) { btn(/^Recover 1 Stress/).click(); await until(() => S.r.result.extra.stressBought === i); }
+    const stressSel = [...document.querySelectorAll("select")].find(x => [...x.options].some(o => o.value === "pc2"));
+    pick(stressSel, "pc2"); await until(() => Number(M.tokens.pc2.props.Stress) === 3);
+    ok(Number(M.tokens.pc2.props.Stress) === 3, "2 Stress recovered for Dr. Yilil (5 -> " + M.tokens.pc2.props.Stress + ")");
+    ok(!btn(/^Recover 1 Stress/).disabled, "a third can still be bought");
+    btn(/^Recover 1 Stress/).click(); await until(() => S.r.result.extra.stressBought === 3);
+    ok(btn(/^Recover 1 Stress/).disabled && /3 of 3/.test(document.body.textContent), "after 3 in total on this task, Recover Stress can't be bought again");
+    A.finishRoll(); await until(() => !S.r.result);
+
+    // Dr. Yilil had an older, treated Injury and was back on her feet; a new hit is avoided: she isn't Defeated.
+    M.tokens.pc2.props.Stress = 0; M.tokens.pc2.props.Defeated = 0;
+    M.tokens.pc2.props.Injuries = JSON.stringify([{ id: "old1", name: "Old burn", severity: 1, kind: "stun", treated: true }]);
+    M.lib.Threat = 6; await A.reload();
+    A.newRoll("npc1"); A.startAction(A.actionById("pc_ranged")); Object.assign(S.r, { attr: "Control", dept: "Security" });
+    S.r.atk.target = "pc2"; window.MockDice = [1, 2]; await A.doRoll();
+    await A.applyPersonalAttack();
+    const injP = JSON.parse(M.tokens.pc2.props.Injuries);
+    ok(injP.length === 2 && injP[1].prevDefeated === 0 && Number(M.tokens.pc2.props.Defeated) === 1, "the hit records that she wasn't Defeated before it");
+    S.r.result = null; S.tab = "character"; S.charId = "pc2"; A.render();
+    const newRow = [...document.querySelectorAll("tr")].find(tr => /Plasma Rifle wound/.test(tr.textContent));
+    [...newRow.querySelectorAll("button")].find(b => /^Avoid \(/.test(b.textContent)).click();
+    await until(() => JSON.parse(M.tokens.pc2.props.Injuries).length === 1);
+    ok(Number(M.tokens.pc2.props.Defeated) === 0 && JSON.parse(M.tokens.pc2.props.Injuries)[0].id === "old1", "avoiding the new Injury leaves her not Defeated, with the old one kept");
+    M.tokens.pc2.props.Injuries = "[]"; M.tokens.pc2.props.Stress = 0; M.tokens.pc2.props.Defeated = 0;
+
+    // A supporting character with no Values is Defeated outright.
+    M.tokens.npc1.props.Kind = "Supporting"; M.tokens.npc1.props.Values = "[]"; M.tokens.npc1.props.Injuries = "[]"; M.tokens.npc1.props.Defeated = 0; await A.reload();
+    A.newRoll("pc1"); A.startAction(A.actionById("pc_ranged")); Object.assign(S.r, { attr: "Control", dept: "Security" });
+    S.r.atk.target = "npc1"; window.MockDice = [1, 2]; await A.doRoll();
+    await A.applyPersonalAttack();
+    ok(Number(M.tokens.npc1.props.Defeated) === 1 && JSON.parse(M.tokens.npc1.props.Injuries).length === 0 && /no Values can't Avoid Injury/.test(lastChat()), "Supporting with no Values: Defeated, no Injury record to avoid");
+    S.r.result = null;
+    M.tokens.npc1.props.Kind = "Notable NPC"; M.tokens.npc1.props.Defeated = 0; M.tokens.npc1.props.Injuries = "[]";
+
+    // Succeed at Cost: the GM's call for players, except where the action allows it.
+    M.ctx.isGM = false; M.lib.Settings = {}; await A.reload();
+    A.newRoll("pc1"); Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 5 }); S.tab = "roll"; A.render();
+    window.MockDice = [15, 16]; await A.doRoll();
+    ok(S.r.result && !S.r.result.success && !btn(/^Succeed at Cost$/) && /the GM's call/.test(document.body.textContent), "player's failed task: no Succeed at Cost button, says it's the GM's call");
+    M.lib.Settings = { sacPlayers: true };
+    const offered = await until(() => !!btn(/^Succeed at Cost$/), 7500);
+    ok(offered && S.r.result, "GM turns on the setting: the button appears on the open result within a few seconds");
+    btn(/^Succeed at Cost$/).click(); await until(() => S.r.result.sac);
+    ok(S.r.result.sac && S.r.result.success, "player succeeds at cost");
+    S.r.result = null; M.lib.Settings = {}; await A.refreshPools();
+    M.tokens.ship1.props.ReservePower = 0; await A.reload();
+    A.newRoll("pc1"); A.startAction(A.actionById("ops_regain")); S.r.baseDiff = 5; A.render();
+    window.MockDice = [15, 16, 17]; await A.doRoll();
+    ok(S.r.result && !S.r.result.success && !!btn(/^Succeed at Cost$/), "Regain Power allows Succeed at Cost without the setting");
+    S.r.result = null; M.ctx.isGM = true; M.tokens.ship1.props.ReservePower = 1; M.tokens.ship1.props.RegainAttempts = 0;
+    await A.reload(); S.tab = "roll";
     return out;
   }, VERSION);
   results.forEach(l => console.log(l));
@@ -386,6 +443,15 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     M.lib.Momentum = 0;
     let err = ""; try { await A.remoteRunners.roll("c1", { tokenId: "pc1", attr: "Control", dept: "Engineering", difficulty: 1, buy: 1 }); } catch (e) { err = e.message; }
     ok(/Not enough Momentum/.test(err) && M.lib.Momentum === 0, "refuses when the pool is empty");
+    M.lib.Settings = {}; M.lib.Momentum = 2;
+    window.MockDice = [15, 16];
+    const fl = await A.remoteRunners.roll("c1", { tokenId: "pc1", attr: "Control", dept: "Engineering", difficulty: 5 });
+    err = ""; try { await A.remoteRunners.rollAction("c1", { rollId: fl.rollId, action: "sac" }); } catch (e) { err = e.message; }
+    ok(/GM's call/.test(err), "Succeed at Cost refused for a remote player unless the GM allows it");
+    M.lib.Settings = { sacPlayers: true };
+    const sc = await A.remoteRunners.rollAction("c1", { rollId: fl.rollId, action: "sac" });
+    ok(sc && sc.sac, "allowed once the GM turns it on");
+    M.lib.Settings = {};
     return out;
   });
   r2.forEach(l => console.log(l));

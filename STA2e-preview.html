@@ -920,7 +920,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.NS = "net.wizardsgate.sta2e";
   A.CHAR_TYPE = "STA2e Character";
   A.SHIP_TYPE = "STA2e Ship";
-  A.VERSION = "1.6.0";
+  A.VERSION = "1.7.0";
 
   A.CHAR_PROPS = R.ATTRIBUTES.concat(R.DEPARTMENTS, ["Kind", "Species", "Rank", "Role", "Focuses", "Values", "Talents",
     "Stress", "StressBonus", "Determination", "Injuries", "Defeated", "FatiguedAttribute", "Protection", "Weapons", "Traits", "Notes",
@@ -1047,6 +1047,10 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     return /NPC/.test(t.p.Kind);
   };
   A.canEdit = function (t) { return !!t && (S.ctx.isGM || t.owner); };
+  // Minor NPCs, and supporting characters with no Values, are Defeated by any successful attack and can't Avoid Injury (p.291, p.347).
+  A.defeatedOutright = function (t) {
+    return !!t && !t.isShip && (t.p.Kind === "Minor NPC" || (t.p.Kind === "Supporting" && !(Array.isArray(t.p.Values) && t.p.Values.length)));
+  };
   A.tok = function (id) { return S.tokens[id] || null; };
   A.chars = function () { return S.order.map(A.tok).filter(function (t) { return t && !t.isShip; }); };
   A.ships = function () { return S.order.map(A.tok).filter(function (t) { return t && t.isShip; }); };
@@ -1850,7 +1854,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         atk: JSON.parse(JSON.stringify(r.atk)), patient: JSON.parse(JSON.stringify(r.patient)), breachSystem: r.breachSystem,
         targets: r.targets.slice(), pick: {}, applied: false, extendedId: r.mode === "task" ? r.extendedId : "",
         opposeFor: r.mode === "opposed" && A.tok(r.opposeId) ? { id: r.opposeId, name: A.tok(r.opposeId).name } : null,
-        extra: { severity: 0, damage: 0, devastating: 0, shields: 0, stressFix: 0, progress: 0 }
+        extra: { severity: 0, damage: 0, devastating: 0, shields: 0, stressFix: 0, stressBought: 0, progress: 0 }
       };
       res.bonusFromWeapon = function () {
         var a = res.action;
@@ -1962,6 +1966,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 
   A.succeedAtCost = function () {
     var res = S.r.result;
+    if (!(S.ctx.isGM || (res.action && res.action.sac) || (S.lib.Settings && S.lib.Settings.sacPlayers))) return A.toast("Succeed at Cost is the GM's call.");
     res.sac = true;
     evaluate(res);
     A.chat(A.card(res.name + " succeeds at cost", res.action ? res.action.name : "", ["Task succeeds with an extra complication. Momentum can't be spent on it."], "#ff9b9b"));
@@ -2112,10 +2117,12 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         var kind = w.injury === "both" ? res.atk.injury : w.injury;
         var inj = (target.p.Injuries || []).slice();
         var rows = [];
-        if (target.p.Kind === "Minor NPC") {
-          rows.push(A.esc(target.name) + " is <b>Defeated</b> (" + (kind === "deadly" ? "killed" : "unconscious") + ").");
+        if (A.defeatedOutright(target)) {
+          rows.push(A.esc(target.name) + " is <b>Defeated</b> (" + (kind === "deadly" ? "killed" : "unconscious") + ")" +
+            (target.p.Kind === "Supporting" ? ": a supporting character with no Values can't Avoid Injury." : "."));
         } else {
-          inj.push({ id: A.uid(), name: w.name + (kind === "deadly" ? " wound" : " stun"), severity: sev, kind: kind, treated: false });
+          inj.push({ id: A.uid(), name: w.name + (kind === "deadly" ? " wound" : " stun"), severity: sev, kind: kind, treated: false,
+            prevDefeated: target.p.Defeated ? 1 : 0 });
           rows.push(A.esc(target.name) + " suffers a <b>" + (kind === "deadly" ? "Deadly" : "Stun") + " Injury, severity " + sev + "</b>" +
             (target.p.Protection && !piercing ? " (after Protection " + target.p.Protection + ")" : "") + " and is Defeated.");
           var av = R.canAvoidInjury(target.p, sev);
@@ -2629,8 +2636,12 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     }
 
     if (res.mode === "task" && !res.success && !res.sac) {
-      out.push(h("div", { class: "card" }, h("div", { class: "row" }, h("span", null, "Failed. If the GM offers it, you can Succeed at Cost: the task succeeds with one extra complication and no Momentum."),
-        h("button", { class: "btn small warn", onclick: A.succeedAtCost }, "Succeed at Cost"))));
+      // p.259: the GM may allow Succeed at Cost. Actions whose rules offer it (Warp, Regain Power) always do.
+      var sacOk = S.ctx.isGM || (res.action && res.action.sac) || !!(S.lib.Settings && S.lib.Settings.sacPlayers);
+      out.push(h("div", { class: "card" }, h("div", { class: "row" },
+        h("span", null, sacOk ? "Failed. You can Succeed at Cost: the task succeeds with one extra complication, and Momentum can't be spent on it."
+          : "Failed. Succeed at Cost is the GM's call (p.259). If the GM offers it, they can turn on \u201cPlayers may choose Succeed at Cost\u201d in GM \u2192 Settings."),
+        sacOk ? h("button", { class: "btn small warn", onclick: A.succeedAtCost }, "Succeed at Cost") : null)));
     }
 
     if (res.mode === "task" && res.success) out.push(effectsCard(res));
@@ -2676,8 +2687,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     b("Keep the Initiative", 2);
     b("Swift Action", 2);
     b("Extra Minor Action", 1);
-    b("Recover 1 Stress", 2, function (r) { r.extra.stressFix += 1; }, res.extra.stressFix >= 3);
+    // p.278: at most 3 Stress recovered per task, however many times it's bought and applied.
+    var stressBought = num(res.extra.stressBought, 0);
+    b("Recover 1 Stress", 2, function (r) { r.extra.stressFix += 1; r.extra.stressBought = num(r.extra.stressBought, 0) + 1; }, stressBought >= 3);
     card.appendChild(btns);
+    if (stressBought) card.appendChild(h("div", { class: "small muted" }, "Recover Stress: " + stressBought + " of 3 for this task."));
     if (res.extra.stressFix) {
       var chars = A.chars().filter(function (x) { return x.p.Stress > 0; });
       card.appendChild(h("div", { class: "row", style: "margin-top:6px" }, "Remove " + res.extra.stressFix + " Stress from",
@@ -3800,7 +3814,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         var name = nm.value || "Injury", base = num(sev.value, 1), k = kind.value, s;
         A.refreshTokens([t]).then(function () {
           s = R.injurySeverity(base, t.p.Protection, false);
-          var list = t.p.Injuries.concat([{ id: A.uid(), name: name, severity: s, kind: k, treated: false }]);
+          var list = t.p.Injuries.concat([{ id: A.uid(), name: name, severity: s, kind: k, treated: false, prevDefeated: t.p.Defeated ? 1 : 0 }]);
           return A.saveToken(t, { Injuries: list, Defeated: 1 });
         }).then(function () {
           return A.chat(A.card(t.name + " is injured", "", [A.esc(name + ", severity " + s + " (" + k + "). Defeated.")], "#b3261e"));
@@ -3871,7 +3885,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (!(p.Injuries || []).some(function (i) { return i.id === inj.id; })) { A.toast(t.name + " no longer has that Injury."); return; }
       var list = p.Injuries.filter(function (i) { return i.id !== inj.id; });
       var ch = { Injuries: list };
+      // Avoiding an Injury also prevents being Defeated by it (p.292): go back to how things were before it.
       if (!list.length) ch.Defeated = 0;
+      else if (inj.prevDefeated !== undefined) ch.Defeated = inj.prevDefeated ? 1 : 0;
       var jobs = [], msg;
       if (av.threat) {
         if (p.Kind === "Notable NPC" && S.lib.NpcAvoidUsed[t.id]) { A.toast("This Notable NPC already avoided an injury this scene."); return; }
@@ -4189,6 +4205,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     out.push(h("div", { class: "card" }, h("h3", null, "Settings"),
       toggle("assistBuyDice", "House rule: assistants may buy extra dice with Momentum/Threat (rules as written: 1d20 only)"),
       toggle("npcRollsGmOnly", "Show NPC rolls to the GM only"),
+      toggle("sacPlayers", "Players may choose Succeed at Cost on any failed task (p.259; Warp and Regain Power always allow it)"),
       h("div", { class: "row", style: "margin-top:6px" }, h("span", null, "Active ship:"),
         A.select((A.activeShip() || {}).id || "", A.tokenOptions(A.ships(), true), function (v) {
           var t = A.tok(v); A.saveLib({ ActiveShip: t ? { id: t.id, map: t.map } : null }).then(A.render).catch(A.fail); }))));
@@ -4298,7 +4315,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (A.busy || typing()) return;
       var open = !!(S.r && S.r.result);
       var shown = open ? [] : A.shownTokens();
-      var snap = function () { return S.lib.Momentum + "/" + S.lib.Threat + JSON.stringify(shown.map(function (t) { return t.raw; })); };
+      var snap = function () { return S.lib.Momentum + "/" + S.lib.Threat + JSON.stringify(S.lib.Settings || {}) + JSON.stringify(shown.map(function (t) { return t.raw; })); };
       var before = snap();
       Promise.all([A.refreshPools(), shown.length ? A.refreshTokens(shown).catch(function () {}) : null]).then(function () {
         if (A.busy || typing() || !!(S.r && S.r.result) !== open) return;
