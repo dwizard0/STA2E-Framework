@@ -48,8 +48,8 @@ What comes across: attributes, departments, species, rank, role, values, focuses
 
 For the **Import…** JSON dialog, use the Foundry VTT export. Roll20 and Fantasy Grounds exports are not supported by that importer. This restriction does not apply to the native MapTool token export described above.
 
-## Updating from 1.3 or 1.4.0
-Drag the new `STA2e.mtlib` onto the map (and the new `STA2e-Remote.mtlib`, if you use it). Then close any open STA 2E window on every client and open it again with `/sta`; the version next to the STA 2E badge should read 1.4.1. Importing `STA2e-TokenTypes.mtprops` again is recommended: it adds the ship's **Shields when lowered** field to the Edit Token dialog. The add-on works without it.
+## Updating from 1.3 or 1.4
+Drag the new `STA2e.mtlib` onto the map (and the new `STA2e-Remote.mtlib`, if you use it). Then close any open STA 2E window on every client and open it again with `/sta`; the version next to the STA 2E badge should read 1.5.0. Importing `STA2e-TokenTypes.mtprops` again is recommended: it adds the ship's **Shields when lowered** field to the Edit Token dialog. The add-on works without it.
 
 ## Updating from 1.1
 Drag the new `STA2e.mtlib` onto the map. You don't need to import the token types again.

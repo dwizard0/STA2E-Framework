@@ -500,6 +500,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     if (v <= 18) return { key: "casualties", name: "Casualties and Minor Damage", effect: "The ship suffers a complication." };
     return { key: "again", name: "Roll Again", effect: "Roll on this table again." };
   }
+  // The result the commanding officer picks (p.309): "brace", "power" or "casualties".
+  function shakenResult(key) { return shakenFromD20({ brace: 1, power: 7, casualties: 13 }[key] || 20); }
 
   function breachCount(breaches) {
     var n = 0;
@@ -604,7 +606,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     injurySeverity: injurySeverity, canAvoidInjury: canAvoidInjury, isDying: isDying, treatmentDifficulty: treatmentDifficulty,
     ratingBonus: ratingBonus, resistance: resistance, shieldsMax: shieldsMax, breakthroughPoints: breakthroughPoints,
     weaponProfile: weaponProfile, hasQuality: hasQuality, versatile: versatile,
-    systemFromD20: systemFromD20, shakenFromD20: shakenFromD20,
+    systemFromD20: systemFromD20, shakenFromD20: shakenFromD20, shakenResult: shakenResult,
     breachCount: breachCount, systemDestroyed: systemDestroyed, criticalDamage: criticalDamage,
     applyShipDamage: applyShipDamage, addBreaches: addBreaches, repairDifficulty: repairDifficulty,
     collisionDamage: collisionDamage, crewQualityRatings: crewQualityRatings,
@@ -918,7 +920,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.NS = "net.wizardsgate.sta2e";
   A.CHAR_TYPE = "STA2e Character";
   A.SHIP_TYPE = "STA2e Ship";
-  A.VERSION = "1.4.1";
+  A.VERSION = "1.5.0";
 
   A.CHAR_PROPS = R.ATTRIBUTES.concat(R.DEPARTMENTS, ["Kind", "Species", "Rank", "Role", "Focuses", "Values", "Talents",
     "Stress", "StressBonus", "Determination", "Injuries", "Defeated", "FatiguedAttribute", "Protection", "Weapons", "Traits", "Notes",
@@ -1558,7 +1560,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     if (action.ship && ship) {
       r.ship = { use: true, id: ship.id, system: action.ship.system, dept: action.ship.dept || action.dept || "" };
     }
-    if (action.effect === "regainPower" && ship) { r.baseDiff = 1 + ship.p.RegainAttempts; r.diffNote = "1 + " + ship.p.RegainAttempts + " earlier attempt(s) this scene"; }
+    if (action.effect === "regainPower" && ship) {
+      var lp = A.hasEffect(ship, "losingPower") ? 1 : 0;   // Shaken: Losing Power! (p.309)
+      r.baseDiff = 1 + ship.p.RegainAttempts + lp;
+      r.diffNote = "1 + " + ship.p.RegainAttempts + " earlier attempt(s) this scene" + (lp ? " + 1 Losing Power" : "");
+    }
     if (action.effect === "regenShields" && ship && ship.p.Shields <= 0) { r.baseDiff = 3; r.diffNote = "2, +1 because shields are at 0"; }
     if (action.effect === "shipAttack") { r.baseDiff = action.weaponKind === "torpedo" ? 3 : 2; }
     S.tab = "roll";
@@ -1625,6 +1631,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (num(o.value, 0)) { total += num(o.value, 0); parts.push((o.value > 0 ? "+" : "") + o.value + (o.reason ? " " + o.reason : "") + " (one-time)"); }
     }
     if (r.mode === "task" && fatigued(t)) { total += 1; parts.push("+1 Fatigued"); }
+    if (r.mode === "task" && cumbersomeShipWeapon()) { total += 1; parts.push("+1 Cumbersome"); }   // p.227
     total = Math.max(0, total);
     return { total: total, parts: parts, opposed: usingOpp ? opp : null };
   }
@@ -1673,6 +1680,14 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     if (!w) return null;
     return { raw: w, prof: R.weaponProfile(s.p, w) };
   }
+  // p.227: a Cumbersome ship weapon is +1 Difficulty to attack with, and a Cumbersome torpedo can't be fired as a salvo.
+  function cumbersomeShipWeapon() {
+    var action = actionById(S.r.actionId);
+    if (!action || action.effect !== "shipAttack") return false;
+    var w = currentShipWeapon();
+    return !!w && R.hasQuality(w.prof.qualities, "Cumbersome");
+  }
+  function salvoAllowed() { return !cumbersomeShipWeapon(); }
   // Area and Spread for a ship attack. Arrays (p.228) and torpedo salvos (p.229) give "Area or Spread",
   // chosen by the attacker when the attack is made; atk.aos holds that choice.
   function attackQualities(atk, w) {
@@ -1706,7 +1721,10 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     }
     // escalation
     var esc = 0;
-    if (action && action.effect === "shipAttack" && action.weaponKind === "torpedo") { esc += r.atk.salvo ? 3 : 1; notes.push(r.atk.salvo ? "Torpedo salvo +3 Threat" : "Torpedo +1 Threat"); }
+    if (action && action.effect === "shipAttack" && action.weaponKind === "torpedo") {
+      var salvo = r.atk.salvo && salvoAllowed();
+      esc += salvo ? 3 : 1; notes.push(salvo ? "Torpedo salvo +3 Threat" : "Torpedo +1 Threat");
+    }
     if (action && action.effect === "personalAttack") {
       if (r.atk.injury === "deadly") { esc += 1; notes.push("Deadly attack +1 Threat"); }
     }
@@ -1760,6 +1778,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     }
     if (action && action.effect === "personalAttack" && !r.atk.target) return A.toast("Choose the target of the attack.");
     if (action && action.effect === "shipAttack" && !r.atk.target) return A.toast("Choose the target ship.");
+    if (r.atk.salvo && !salvoAllowed()) r.atk.salvo = false;
 
     var n = diceCount();
     var rollN = r.perfect ? n - 1 : n;
@@ -1841,6 +1860,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (rerouted) change(rerouted, "ReroutedSystem", "");
       if (spendPower) change(ps, "ReservePower", 0);
       if (regain) change(ps, "RegainAttempts", ps.p.RegainAttempts + 1);
+      if (regain && A.hasEffect(ps, "losingPower")) change(ps, "Effects", ps.p.Effects.filter(function (x) { return x.key !== "losingPower"; }));
       Object.keys(ships).forEach(function (id) { saves.push(A.saveToken(ships[id].s, ships[id].ch)); });
       return Promise.all(saves);
     }));
@@ -1978,6 +1998,61 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.pushEffect = pushEffect;
   A.hasEffect = function (ship, key) { return !!ship && (ship.p.Effects || []).some(function (e) { return e.key === key; }); };
 
+  /* ---------------- Shaken (p.308-309) ----------------
+   * NPC ships always Brace for Impact. For other ships the commanding officer (or highest-ranking character)
+   * picks a result or rolls for it, so damage leaves a "Shaken" effect on the ship and the Ship tab offers
+   * the choice. A roll of 19-20 is Roll Again.
+   */
+  var BRACE = { key: "brace", label: "Brace for Impact: no major action next turn" };
+  var LOSING_POWER = { key: "losingPower", label: "Losing Power: next Regain Power +1 Difficulty" };
+  function withEffect(list, e) { return list.filter(function (x) { return x.key !== e.key; }).concat([Object.assign({}, e)]); }
+  function pendingIn(list) { var e = list.filter(function (x) { return x.key === "shaken"; })[0]; return e ? Math.max(1, num(e.count, 1)) : 0; }
+  function pendingEffect(n) { return { key: "shaken", label: n > 1 ? "Shaken ×" + n + ": pick results" : "Shaken: pick a result", count: n }; }
+  A.shakenPending = function (ship) { return ship ? pendingIn(ship.p.Effects || []) : 0; };
+
+  // n Shaken results from one attack. Returns the ship's new Effects list and a line for the damage card.
+  A.addShaken = function (ship, effects, n) {
+    if (A.isNPC(ship)) return { effects: withEffect(effects, BRACE),
+      row: "<b>Shaken:</b> Brace for Impact! " + A.esc(ship.name) + " can't take a major action on its next turn (NPC ships always brace)." };
+    var total = pendingIn(effects) + n;
+    return { effects: withEffect(effects, pendingEffect(total)),
+      row: "<b>Shaken" + (n > 1 ? " ×" + n : "") + ":</b> " + A.esc(ship.name) + "'s commanding officer picks a result on the Ship tab, or rolls for it." };
+  };
+
+  // Resolve one pending Shaken result. key: "brace", "power", "casualties", or "roll" (d20, re-rolling 19-20).
+  A.resolveShaken = function (ship, key) {
+    if (A.busy) return Promise.resolve();
+    A.busy = true; A.render();
+    var rolls = [];
+    function roll() {
+      return A.rollDice(1).then(function (v) {
+        var d = num(v[0], 20); rolls.push(d);
+        var sh = R.shakenFromD20(d);
+        return sh.key === "again" && rolls.length < 20 ? roll() : sh;
+      });
+    }
+    return A.refreshTokens([ship]).then(function () {
+      var n = A.shakenPending(ship);
+      if (!n) { A.toast(ship.name + "'s Shaken result has already been chosen."); return null; }
+      return (key === "roll" ? roll() : Promise.resolve(R.shakenResult(key))).then(function (sh) {
+        var eff = (ship.p.Effects || []).filter(function (x) { return x.key !== "shaken"; });
+        if (n > 1) eff.push(pendingEffect(n - 1));
+        var ch = {}, rows = ["<b>" + A.esc(sh.name) + "</b> " + A.esc(sh.effect) + (rolls.length ? ' <font size="-1">(d20: ' + rolls.join(", ") + ")</font>" : "")];
+        if (sh.key === "brace") eff = withEffect(eff, BRACE);
+        if (sh.key === "power") {
+          eff = withEffect(eff, LOSING_POWER);
+          if (ship.p.ReservePower) { ch.ReservePower = 0; rows.push(A.esc(ship.name) + " loses its Reserve Power."); }
+        }
+        if (sh.key === "casualties") rows.push("The GM adds a complication for " + A.esc(ship.name) + ".");
+        if (n > 1) rows.push((n - 1) + " more Shaken result" + (n > 2 ? "s" : "") + " to pick.");
+        ch.Effects = eff;
+        return A.saveToken(ship, ch).then(function () {
+          return A.chat(A.card(ship.name + " is shaken", key === "roll" ? "rolled" : "chosen by the commanding officer", rows, "#f29c38"));
+        });
+      });
+    }).then(function () { A.busy = false; A.render(); }, function (e) { A.busy = false; A.render(); A.fail(e); });
+  };
+
   A.applyPersonalAttack = function () {
     var res = S.r.result, target = A.tok(res.atk.target), w = currentPersonalWeapon();
     if (!target || !w) return A.toast("Choose a weapon and target.");
@@ -2027,8 +2102,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var aq = attackQualities(res.atk, w);
     if (aq.choose) notes.push(aq.pick === "area" ? "Area" : "Spread");
     var nDev = res.extra.devastating || 0;
-    // d20s: [0] system hit, [1] shaken result, [2..] one extra system per Devastating Attack.
-    return A.rollDice(2 + nDev).then(function (v) {
+    // d20s: [0] system hit, [1..] one extra system per Devastating Attack.
+    return A.rollDice(1 + nDev).then(function (v) {
       var sys = chosen || R.systemFromD20(v[0]);
       var out = R.applyShipDamage(target.p, { damage: dmg, piercing: piercing, depleting: R.hasQuality(q, "Depleting"),
         highYield: R.hasQuality(q, "High Yield"), extraResistance: extraRes, complications: comps, system: sys });
@@ -2042,7 +2117,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (out.breaches) rows.push("<b>" + out.breaches + " breach" + (out.breaches > 1 ? "es" : "") + " to " + sys + "</b>" + (chosen ? " (Targeting Solution)" : " (d20: " + v[0] + ")"));
       // p.307: each Devastating Attack hits another rolled system for half the attack's damage, rounded up.
       for (var di = 0; di < nDev; di++) {
-        var sys2 = R.systemFromD20(v[2 + di]);
+        var sys2 = R.systemFromD20(v[1 + di]);
         var half = Math.ceil(dmg / 2);
         var tmp = Object.assign({}, target.p, { Shields: shields });
         var out2 = R.applyShipDamage(tmp, { damage: half, piercing: piercing, highYield: R.hasQuality(q, "High Yield"), extraResistance: extraRes, system: sys2 });
@@ -2051,14 +2126,17 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         rows.push("Devastating Attack" + (nDev > 1 ? " " + (di + 1) : "") + ": " + sys2 + " takes " + out2.final + " (shields &rarr; " + shields + ")" + (out2.breaches ? ", <b>" + out2.breaches + " breach(es)</b>" : ""));
         out.shakenCount += out2.shakenCount;
       }
+      var ch = { Shields: shields, Breaches: breaches };
       if (out.shakenCount) {
-        var sh = A.isNPC(target) ? R.shakenFromD20(1) : R.shakenFromD20(v[1]);
-        rows.push("<b>Shaken:</b> " + A.esc(sh.name) + " " + A.esc(sh.effect) + (A.isNPC(target) ? " (NPC ships always Brace for Impact)" : " (d20: " + v[1] + ")"));
+        var shk = A.addShaken(target, target.p.Effects || [], out.shakenCount);
+        ch.Effects = shk.effects; rows.push(shk.row);
       }
+      // p.227: Dampening drains the target's Reserve Power.
+      if (R.hasQuality(q, "Dampening") && target.p.ReservePower) { ch.ReservePower = 0; rows.push("Dampening: " + A.esc(target.name) + " loses its Reserve Power."); }
       var np = Object.assign({}, target.p, { Breaches: breaches });
       R.SYSTEMS.forEach(function (s) { if (R.systemDestroyed(np, s) && !R.systemDestroyed(target.p, s)) rows.push("<b>" + s + " DESTROYED.</b>"); });
       if (R.criticalDamage(np)) rows.push('<font color="#b3261e"><b>CRITICAL DAMAGE: ' + A.esc(target.name) + " can no longer function.</b></font>");
-      return A.saveToken(target, { Shields: shields, Breaches: breaches }).then(function () {
+      return A.saveToken(target, ch).then(function () {
         res.applied = true;
         return A.chat(A.card(atkShip.name + " fires on " + target.name, w.prof.name, rows, "#b3261e"));
       });
@@ -2161,6 +2239,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
 
     if (!t) { out.push(h("div", { class: "notice" }, "No STA2e tokens found. Select a token, or create one on the Character or Ship tab.")); return out; }
     if (!t.isSTA) out.push(h("div", { class: "notice" }, t.name + " is not an STA2e token yet. Convert it on the Character or Ship tab."));
+    var braced = t.isShip ? t : A.activeShip();
+    if (action && action.type === "major" && A.hasEffect(braced, "brace")) out.push(h("div", { class: "notice" },
+      "Brace for Impact on " + braced.name + ": no major action on its next turn, for the ship or anyone aboard (p.309). End the effect on the Ship tab once that turn has passed."));
 
     // attribute & department tiles
     var tiles = h("div", { class: "card" });
@@ -2324,11 +2405,15 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         if (!wl.length) box.appendChild(h("div", { class: "notice" }, (me ? me.name : "The ship") + " has no " + action.weaponKind + " weapons. Add them on the Ship tab."));
         else row.appendChild(h("label", { class: "field" }, "Weapon", A.select(r.atk.weapon || wl[0].name, wl.map(function (x) {
           var p = R.weaponProfile(me.p, x); return { value: x.name, label: p.name + " (" + p.damage + " dmg, " + p.range + ")" }; }), function (v) { r.atk.weapon = v; A.render(); })));
-        if (action.weaponKind === "torpedo") row.appendChild(h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: r.atk.salvo, onchange: function (e) { r.atk.salvo = e.target.checked; A.render(); } }), "Salvo (+1 dmg, Area or Spread, 3 Threat)"));
+        if (action.weaponKind === "torpedo") {
+          if (!salvoAllowed()) r.atk.salvo = false;
+          row.appendChild(h("label", { class: "row tight" + (salvoAllowed() ? "" : " muted") }, h("input", { type: "checkbox", checked: r.atk.salvo, disabled: !salvoAllowed(), onchange: function (e) { r.atk.salvo = e.target.checked; A.render(); } }),
+            salvoAllowed() ? "Salvo (+1 dmg, Area or Spread, 3 Threat)" : "Salvo (not with a Cumbersome torpedo)"));
+        }
         if (sw && attackQualities(r.atk, sw).choose) row.appendChild(h("label", { class: "field" }, "Area or Spread", A.select(attackQualities(r.atk, sw).pick, [
           { value: "spread", label: "Spread: Devastating Attack 1 Momentum, repeatable" },
           { value: "area", label: "Area: extra targets in the zone, 1 Momentum each" }], function (v) { r.atk.aos = v; A.render(); })));
-        if (sw && R.hasQuality(sw.prof.qualities, "Cumbersome")) box.appendChild(h("div", { class: "small muted" }, "Cumbersome: +1 Difficulty."));
+        if (sw && R.hasQuality(sw.prof.qualities, "Cumbersome")) box.appendChild(h("div", { class: "small muted" }, "Cumbersome: +1 Difficulty (included)" + (action.weaponKind === "torpedo" ? "; can't be fired as a salvo." : ".")));
         if (sw) box.appendChild(h("div", { class: "small muted" }, sw.prof.qualities.map(qualityHint).join(" · ") || "No special qualities"));
       }
       row.appendChild(h("label", { class: "field" }, "Target ship", A.select(r.atk.target, A.tokenOptions(targetsS, true), function (v) { r.atk.target = v; A.render(); })));
@@ -3842,6 +3927,23 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     st.appendChild(eff);
     out.push(st);
 
+    // Shaken results waiting for the commanding officer's pick (p.309)
+    var pend = A.shakenPending(s);
+    if (pend) {
+      var sk = h("div", { class: "card" }, h("h3", null, "Shaken" + (pend > 1 ? " ×" + pend : ""),
+        h("span", { class: "sub" }, "the commanding officer picks a result, or rolls for it (p.309)")));
+      var sr = h("div", { class: "row" });
+      [["brace", "Brace for Impact!"], ["power", "Losing Power!"], ["casualties", "Casualties and Minor Damage"], ["roll", "Roll d20"]].forEach(function (o) {
+        sr.appendChild(h("button", { class: "btn small" + (o[0] === "roll" ? "" : " primary"), disabled: A.busy,
+          title: o[0] === "roll" ? "1-6 Brace, 7-12 Losing Power, 13-18 Casualties, 19-20 roll again" : R.shakenResult(o[0]).effect,
+          onclick: function () { A.resolveShaken(s, o[0]); } }, o[1]));
+      });
+      sk.appendChild(sr);
+      sk.appendChild(h("div", { class: "small muted", style: "margin-top:4px" },
+        "Brace for Impact: no major action on the next turn. Losing Power: lose Reserve Power; next Regain Power +1 Difficulty. Casualties: the ship suffers a complication."));
+      out.push(sk);
+    }
+
     // systems/departments
     var sd = h("div", { class: "card" }, h("h3", null, "Systems & Departments", ed ? h("span", { class: "sub" }, "Scale ") : null, ed ? A.stepper(p.Scale, set("Scale"), 1, 12) : null));
     [R.SYSTEMS, R.DEPARTMENTS].forEach(function (list) {
@@ -3926,13 +4028,14 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: st.piercing, onchange: function (e) { st.piercing = e.target.checked; } }), "Piercing"),
       h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: st.depleting, onchange: function (e) { st.depleting = e.target.checked; } }), "Depleting"),
       h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: st.highYield, onchange: function (e) { st.highYield = e.target.checked; } }), "High Yield"),
+      h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: !!st.dampening, onchange: function (e) { st.dampening = e.target.checked; } }), "Dampening"),
       A.select(st.system, [{ value: "", label: "Random system" }].concat(R.SYSTEMS), function (v) { st.system = v; }),
       h("button", { class: "btn primary small", onclick: function () { incoming(s, st); } }, "Apply")));
     return card;
   }
 
   function incoming(s, st) {
-    A.refreshTokens([s]).then(function () { return A.rollDice(2); }).then(function (v) {
+    A.refreshTokens([s]).then(function () { return A.rollDice(1); }).then(function (v) {
       var sys = st.system || R.systemFromD20(v[0]);
       var out = R.applyShipDamage(s.p, { damage: st.damage, piercing: st.piercing, depleting: st.depleting, highYield: st.highYield,
         extraResistance: A.hasEffect(s, "modulate") ? 2 : 0, system: sys });
@@ -3940,8 +4043,10 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         "Shields " + out.shieldsBefore + " &rarr; " + out.shieldsAfter];
       out.notes.forEach(function (n) { rows.push(A.esc(n)); });
       if (out.breaches) rows.push("<b>" + out.breaches + " breach(es) to " + sys + "</b>");
-      if (out.shakenCount) { var sh = A.isNPC(s) ? R.shakenFromD20(1) : R.shakenFromD20(v[1]); rows.push("<b>Shaken:</b> " + A.esc(sh.name) + " " + A.esc(sh.effect)); }
-      return A.saveToken(s, { Shields: out.shieldsAfter, Breaches: R.addBreaches(s.p.Breaches, sys, out.breaches) }).then(function () {
+      var ch = { Shields: out.shieldsAfter, Breaches: R.addBreaches(s.p.Breaches, sys, out.breaches) };
+      if (out.shakenCount) { var shk = A.addShaken(s, s.p.Effects || [], out.shakenCount); ch.Effects = shk.effects; rows.push(shk.row); }
+      if (st.dampening && s.p.ReservePower) { ch.ReservePower = 0; rows.push("Dampening: " + A.esc(s.name) + " loses its Reserve Power."); }
+      return A.saveToken(s, ch).then(function () {
         return A.chat(A.card(s.name + " takes damage", "", rows, "#b3261e"));
       });
     }).then(A.render).catch(A.fail);

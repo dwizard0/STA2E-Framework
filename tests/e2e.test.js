@@ -236,6 +236,77 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     const seen = await until(() => /Shields 7 \/ 16/.test(document.body.textContent), 9000);
     ok(seen, "Ship tab shows another client's change within a few seconds, without pressing reload");
     M.tokens.ship1.props.Shields = 16; await A.reload(); S.tab = "roll";
+
+    // ---- 11. Ship combat: Shaken picked by the commanding officer, Losing Power, Brace, Dampening, Cumbersome ----
+    const effects = (id) => JSON.parse(M.tokens[id].props.Effects || "[]");
+    const hasEff = (id, key) => effects(id).some(e => e.key === key);
+    // Incoming damage that takes the players' ship from full to between 25% and 50%: one Shaken result.
+    async function incomingTo(id, extra) {
+      await A.reload();
+      const s = A.tok(id), mx = R.shieldsMax(s.p), fin = Math.ceil(mx * 0.6);
+      M.tokens[id].props.Shields = mx; await A.reload();
+      S.dmgTool = Object.assign({ damage: fin + R.resistance(A.tok(id).p), piercing: false, depleting: false, highYield: false, comps: 0, system: "Structure" }, extra || {});
+      S.tab = "ship"; S.shipId = id; A.render();
+      const before = M.log.length;
+      const card = [...document.querySelectorAll(".card")].find(c => /^Incoming damage/.test((c.querySelector("h3") || {}).textContent || ""));
+      [...card.querySelectorAll("button")].find(b => b.textContent === "Apply").click();
+      await until(() => M.log.length > before);
+    }
+    const R = window.Rules;
+    M.ctx.isGM = true; M.tokens.ship1.props.Effects = "[]"; M.tokens.ship2.props.Effects = "[]";
+    M.tokens.ship1.props.ReservePower = 1; M.tokens.ship1.props.RegainAttempts = 0;
+    await incomingTo("ship1");
+    ok(effects("ship1").some(e => e.key === "shaken" && Number(e.count) === 1), "PC ship shaken: a Shaken result is left for the commanding officer (" + M.tokens.ship1.props.Effects + ")");
+    ok(/commanding officer picks a result/.test(lastChat()), "damage card says the commanding officer picks");
+    A.render();
+    const shakenCard = () => [...document.querySelectorAll(".card")].find(c => /^Shaken/.test((c.querySelector("h3") || {}).textContent || ""));
+    ok(!!shakenCard(), "Ship tab shows the Shaken card");
+    [...shakenCard().querySelectorAll("button")].find(b => b.textContent === "Losing Power!").click();
+    await until(() => !hasEff("ship1", "shaken"));
+    ok(!hasEff("ship1", "shaken") && hasEff("ship1", "losingPower") && Number(M.tokens.ship1.props.ReservePower) === 0, "Losing Power: Reserve Power lost, Losing Power effect added, nothing left to pick");
+    ok(/Losing Power!/.test(lastChat()), "chat card reports the pick");
+    A.newRoll("pc1"); A.startAction(A.actionById("ops_regain"));
+    ok(S.r.baseDiff === 2 && /Losing Power/.test(S.r.diffNote), "next Regain Power is +1 Difficulty (" + S.r.baseDiff + ", " + S.r.diffNote + ")");
+    window.MockDice = [1, 1, 1]; await A.doRoll();
+    await until(() => !hasEff("ship1", "losingPower"));
+    ok(!hasEff("ship1", "losingPower") && Number(M.tokens.ship1.props.RegainAttempts) === 1, "the Regain Power attempt uses up the Losing Power penalty");
+    S.r.result = null;
+
+    await incomingTo("ship1");
+    A.render();
+    window.MockDice = [19, 20, 3];
+    [...shakenCard().querySelectorAll("button")].find(b => b.textContent === "Roll d20").click();
+    await until(() => !hasEff("ship1", "shaken"));
+    ok(hasEff("ship1", "brace") && /d20: 19, 20, 3/.test(lastChat()), "Roll d20: 19 and 20 roll again, 3 is Brace for Impact (" + lastChat().replace(/<[^>]+>/g, "").slice(-60) + ")");
+    A.newRoll("pc1"); A.startAction(A.actionById("tac_trait")); S.tab = "roll"; A.render();
+    ok(/Brace for Impact on U\.S\.S\. Veritas: no major action/.test(document.body.textContent), "major action from aboard a braced ship shows the Brace for Impact notice");
+
+    await incomingTo("ship2");
+    ok(hasEff("ship2", "brace") && !hasEff("ship2", "shaken") && /NPC ships always brace/.test(lastChat()), "NPC ship shaken: Brace for Impact applied, no pick");
+
+    M.tokens.ship1.props.Effects = "[]"; M.tokens.ship1.props.ReservePower = 1;
+    await incomingTo("ship1", { dampening: true, damage: 1 });
+    ok(Number(M.tokens.ship1.props.ReservePower) === 0 && /Dampening/.test(lastChat()), "incoming Dampening damage drains Reserve Power");
+
+    // Positron torpedoes: Calibration, Cumbersome, Dampening.
+    M.tokens.ship1.props.ShipWeapons = JSON.stringify([{ kind: "torpedo", type: "Positron", name: "Positron Torpedoes" }]);
+    M.tokens.ship1.props.Effects = "[]"; M.tokens.ship2.props.Effects = "[]"; M.tokens.ship2.props.ReservePower = 1;
+    M.lib.Momentum = 0; M.lib.Threat = 6; await A.reload();
+    A.newRoll("pc1"); A.startAction(A.actionById("tac_fire_torpedo")); Object.assign(S.r, { attr: "Control", dept: "Security" });
+    S.r.atk.target = "ship2"; S.r.atk.salvo = true; S.tab = "roll"; A.render();
+    const salvoBox = [...document.querySelectorAll("label")].find(l => /^Salvo/.test(l.textContent));
+    ok(salvoBox && salvoBox.querySelector("input").disabled && !S.r.atk.salvo, "Cumbersome torpedo: salvo box disabled and cleared (" + (salvoBox && salvoBox.textContent) + ")");
+    ok(/\+1 Cumbersome/.test(document.body.textContent), "Cumbersome shows in the Difficulty");
+    window.MockDice = [1, 1, 1]; await A.doRoll();
+    ok(S.r.result && S.r.result.difficulty === 4, "Cumbersome torpedo attack is Difficulty 3 + 1 = " + (S.r.result && S.r.result.difficulty));
+    ok(M.lib.Threat === 7, "single torpedo adds 1 Threat, not a salvo's 3 (Threat " + M.lib.Threat + ")");
+    window.MockDice = [12];
+    await A.applyShipAttack();
+    ok(Number(M.tokens.ship2.props.ReservePower) === 0 && /Dampening: Klingon Bird-of-Prey loses its Reserve Power/.test(lastChat()), "Dampening torpedo hit drains the target's Reserve Power");
+    S.r.result = null;
+    M.tokens.ship1.props.ShipWeapons = JSON.stringify([{ kind: "energy", type: "Phaser", delivery: "Arrays", name: "Phaser Arrays" }, { kind: "torpedo", type: "Photon", name: "Photon Torpedoes" }]);
+    ["ship1", "ship2"].forEach(id => { const p = M.tokens[id].props; p.Effects = "[]"; p.ReservePower = 1; p.RegainAttempts = 0; p.Breaches = "{}"; });
+    M.tokens.ship1.props.Shields = 16; await A.reload(); S.tab = "roll";
     return out;
   }, VERSION);
   results.forEach(l => console.log(l));
