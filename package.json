@@ -1,0 +1,13 @@
+{
+  "name": "sta2e-framework",
+  "private": true,
+  "description": "Tests for the STA 2E MapTool add-on. The add-on itself has no Node dependencies.",
+  "scripts": {
+    "test": "node tests/rules.test.js && node tests/e2e.test.js",
+    "test:rules": "node tests/rules.test.js",
+    "test:e2e": "node tests/e2e.test.js"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

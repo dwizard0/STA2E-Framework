@@ -29,12 +29,14 @@ The remote add-on requires a separate `api.php` relay server. The relay implemen
 | Location | Purpose |
 | --- | --- |
 | `src/STA2e/` | Core add-on source (1.4.1) |
-| `src/STA2e-Remote/` | Remote add-on source (0.6.1) |
+| `src/STA2e-Remote/` | Remote add-on source (0.6.2) |
 | `src/STA2e-TokenTypes/` | Campaign property package source |
 | `dist/` | Installable MapTool packages |
 | `tools/build.py` | Package builder and source/package consistency check |
+| `tools/sync_shared.py` | Copies the shared rules, action data and mock MapTool from the core page into the remote page and the preview |
+| `tests/` | Rules tests (Node) and end-to-end tests of both pages (Playwright) |
 
-Edit source under `src/`, run `python tools/build.py`, and commit both source and updated packages. Run `python tools/build.py --check` to verify that the packages match the source. See [CONTRIBUTING.md](CONTRIBUTING.md) for the maintenance workflow.
+Edit source under `src/`, run `python tools/sync_shared.py` and `python tools/build.py`, and commit both source and updated packages. `python tools/build.py --check` verifies that the packages match the source, and `npm test` runs the tests. GitHub runs all of these on every push and pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for the maintenance workflow.
 
 This initial repository contains the original framework and remote add-on. The experimental GM voice connector is maintained separately from this baseline.
 

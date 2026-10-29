@@ -1,6 +1,15 @@
 # Changelog
 
-## Core 1.4.1 (unreleased)
+## Remote 0.6.2 (unreleased)
+
+- The remote page's action list is in step with the core page again: Ram no longer lists Reserve Power and a Prepare minor action as requirements, and Reroute Power's description matches the core rule fix.
+
+### Development
+- Tests are now in the repository: `tests/rules.test.js` checks the rules engine in both pages, and `tests/e2e.test.js` drives both pages in Chromium against the built-in mock MapTool. Run them with `npm test`.
+- `tools/sync_shared.py` copies the shared rules, action data and mock MapTool from the core page into the remote page and refreshes `STA2e-preview.html`. `--check` reports a copy that has drifted.
+- GitHub runs the sync check, the package check and the tests on every push and pull request.
+
+## Core 1.4.1
 
 - The Momentum and Threat shown in the header and on the Spend Momentum card now stay current while a roll result is open. Before, they only updated after leaving the result.
 - If a spend, bought die, complication buy-off, consequence or Avoid Injury looks unaffordable from the pools on screen, the window re-reads the pools and tries again before refusing. Before, an out-of-date display could refuse a spend the pool could cover.
