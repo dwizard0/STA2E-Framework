@@ -1375,7 +1375,7 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
   var ctxOverride = { isGM: true };
   var SHARED_PROPS = ["Stress", "Injuries", "Defeated", "Shields", "Breaches", "Effects", "ReservePower", "ReroutedSystem", "RegainAttempts",
     "StressText", "StressPct", "DeterminationText", "Status", "InjuryList", "FocusList", "ShieldsText", "ShieldsPct", "Resistance", "PowerStatus", "BreachList", "EffectList"];
-  var PLAYER_LIB_KEYS = ["Assists", "Opposed", "Extended", "DiffOneTime"];
+  var PLAYER_LIB_KEYS = ["Opposed", "DiffOneTime"];   // as api/libSet.mts
 
   function call(name, args) {
     var out;
@@ -1448,6 +1448,17 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
         var m1 = err ? m0 : Math.min(Math.max(m0 + dm, 0), 6), t1 = err ? t0 : Math.max(t0 + dt, 0);
         if (!err) { lib.Momentum = m1; lib.Threat = t1; }
         out = { ok: err ? 0 : 1, error: err, Momentum: m1, Threat: t1, dMomentum: m1 - m0, dThreat: t1 - t0 }; break;
+      }
+      case "version":
+        // Mirrors api/version.mts. Tests set MockInstalledVersion to act out a newer add-on.
+        out = { version: root.MockInstalledVersion || (root.App && root.App.VERSION) || "" }; break;
+      case "hits": {
+        // Mirrors api/hits.mts.
+        var hs = JSON.parse(JSON.stringify(lib.Hits && typeof lib.Hits === "object" ? lib.Hits : {}));
+        Object.keys(args.add || {}).forEach(function (k) { hs[k] = JSON.parse(JSON.stringify(args.add[k])); });
+        (args.remove || []).forEach(function (k) { delete hs[k]; });
+        lib.Hits = hs;
+        out = { ok: 1, Hits: JSON.parse(JSON.stringify(hs)) }; break;
       }
       case "assists": {
         // Mirrors api/assists.mts.

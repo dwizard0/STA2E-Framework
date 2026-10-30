@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / "src/STA2e/library/public/app.html"
 REMOTE = ROOT / "src/STA2e-Remote/library/public/remote.html"
 PREVIEW = ROOT / "STA2e-preview.html"
+LIBJSON = ROOT / "src/STA2e/library.json"
+VERSION_MTS = ROOT / "src/STA2e/library/mtscript/public/api/version.mts"
 SHARED = ["rules.js", "data.js", "mock.js"]
 
 
@@ -34,12 +36,20 @@ def main():
         sr, er = bounds(synced, name)
         synced = synced[:sr] + app[sa:ea] + synced[er:]
     preview = PREVIEW.read_text(encoding="utf-8") if PREVIEW.exists() else ""
+    import json, re
+    version = json.loads(LIBJSON.read_text(encoding="utf-8"))["version"]
+    vm = VERSION_MTS.read_text(encoding="utf-8")
+    vm_new = re.sub(r'"version", "[^"]*"', '"version", "%s"' % version, vm)
 
     problems = []
     if synced != remote:
         problems.append("remote.html: shared sections (%s) differ from app.html" % ", ".join(SHARED))
     if preview != app:
         problems.append("STA2e-preview.html differs from app.html")
+    if vm_new != vm:
+        problems.append("api/version.mts doesn't say %s (library.json)" % version)
+    if 'A.VERSION = "%s";' % version not in app:
+        problems.append("app.html's A.VERSION doesn't match library.json (%s)" % version)
 
     if check:
         for p in problems:
@@ -56,6 +66,9 @@ def main():
     if preview != app:
         PREVIEW.write_text(app, encoding="utf-8")
         print("updated STA2e-preview.html")
+    if vm_new != vm:
+        VERSION_MTS.write_text(vm_new, encoding="utf-8")
+        print("updated api/version.mts")
     if not problems:
         print("already in step")
     return 0

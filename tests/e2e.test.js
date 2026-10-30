@@ -397,21 +397,60 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     ok(btn(/^Recover 1 Stress/).disabled && /3 of 3/.test(document.body.textContent), "after 3 in total on this task, Recover Stress can't be bought again");
     A.finishRoll(); await until(() => !S.r.result);
 
-    // Dr. Yilil had an older, treated Injury and was back on her feet; a new hit is avoided: she isn't Defeated.
-    M.tokens.pc2.props.Stress = 0; M.tokens.pc2.props.Defeated = 0;
+    // A hit that can be avoided waits for the target's choice (p.292). Dr. Yilil had an older, treated Injury and was back on her feet.
+    M.tokens.pc2.props.Stress = 0; M.tokens.pc2.props.Defeated = 0; M.lib.Hits = {};
     M.tokens.pc2.props.Injuries = JSON.stringify([{ id: "old1", name: "Old burn", severity: 1, kind: "stun", treated: true }]);
     M.lib.Threat = 6; await A.reload();
     A.newRoll("npc1"); A.startAction(A.actionById("pc_ranged")); Object.assign(S.r, { attr: "Control", dept: "Security" });
     S.r.atk.target = "pc2"; window.MockDice = [1, 2]; await A.doRoll();
     await A.applyPersonalAttack();
-    const injP = JSON.parse(M.tokens.pc2.props.Injuries);
-    ok(injP.length === 2 && injP[1].prevDefeated === 0 && Number(M.tokens.pc2.props.Defeated) === 1, "the hit records that she wasn't Defeated before it");
-    S.r.result = null; S.tab = "character"; S.charId = "pc2"; A.render();
-    const newRow = [...document.querySelectorAll("tr")].find(tr => /Plasma Rifle wound/.test(tr.textContent));
-    [...newRow.querySelectorAll("button")].find(b => /^Avoid \(/.test(b.textContent)).click();
+    let injP = JSON.parse(M.tokens.pc2.props.Injuries);
+    ok(injP.length === 2 && injP[1].pending === 1 && injP[1].prevDefeated === 0 && Number(M.tokens.pc2.props.Defeated) === 0, "the hit waits for her choice: Injury marked waiting, not Defeated yet");
+    ok(Object.keys(M.lib.Hits || {}).length === 1 && /Dr\. Yilil chooses:/.test(lastChat()), "a waiting hit is shared and the hit card says she chooses");
+    S.r.result = null;
+    // Her player's window (she's owned by this player) shows the choice above any tab.
+    M.ctx.isGM = false; await A.reload(); S.tab = "extended"; A.render();
+    const hitCard = () => [...document.querySelectorAll(".card")].find(c => /^Dr\. Yilil is hit/.test((c.querySelector("h3") || {}).textContent || ""));
+    ok(!!hitCard() && /Avoid: take \d+ Stress/.test(hitCard().textContent) && /Accept the Injury/.test(hitCard().textContent), "her player sees 'Dr. Yilil is hit' with Avoid and Accept, on any tab");
+    [...hitCard().querySelectorAll("button")].find(b => /^Avoid: take/.test(b.textContent)).click();
     await until(() => JSON.parse(M.tokens.pc2.props.Injuries).length === 1);
-    ok(Number(M.tokens.pc2.props.Defeated) === 0 && JSON.parse(M.tokens.pc2.props.Injuries)[0].id === "old1", "avoiding the new Injury leaves her not Defeated, with the old one kept");
+    ok(Number(M.tokens.pc2.props.Defeated) === 0 && JSON.parse(M.tokens.pc2.props.Injuries)[0].id === "old1" && Number(M.tokens.pc2.props.Stress) > 0,
+      "Avoid: the new Injury is gone, she takes the Stress, isn't Defeated, and the old Injury is kept");
+    await until(() => !hitCard());
+    ok(!Object.keys(M.lib.Hits || {}).length && !hitCard(), "the choice card goes away once she's chosen");
+    // A second hit, accepted this time.
+    M.ctx.isGM = true; M.tokens.pc2.props.Stress = 0; await A.reload();
+    A.newRoll("npc1"); A.startAction(A.actionById("pc_ranged")); Object.assign(S.r, { attr: "Control", dept: "Security" });
+    S.r.atk.target = "pc2"; window.MockDice = [1, 2]; await A.doRoll();
+    await A.applyPersonalAttack(); S.r.result = null; S.tab = "roll"; A.render();
+    ok(!!hitCard(), "the GM sees the choice for a player's character too");
+    [...hitCard().querySelectorAll("button")].find(b => b.textContent === "Accept the Injury").click();
+    await until(() => Number(M.tokens.pc2.props.Defeated) === 1);
+    injP = JSON.parse(M.tokens.pc2.props.Injuries);
+    ok(Number(M.tokens.pc2.props.Defeated) === 1 && injP.length === 2 && !injP[1].pending && !Object.keys(M.lib.Hits || {}).length && /takes the Injury/.test(lastChat()),
+      "Accept: she's Defeated, the Injury stays, the choice is cleared");
+    // A Notable NPC's choice is the GM's, paid in Threat.
+    M.tokens.npc1.props.Injuries = "[]"; M.tokens.npc1.props.Defeated = 0; M.lib.NpcAvoidUsed = {}; await A.reload();
+    A.newRoll("pc1"); A.startAction(A.actionById("pc_ranged")); Object.assign(S.r, { attr: "Control", dept: "Security" });
+    S.r.atk.target = "npc1"; window.MockDice = [1, 2]; await A.doRoll();
+    await A.applyPersonalAttack(); S.r.result = null; A.render();
+    const npcCard = [...document.querySelectorAll(".card")].find(c => /^Jem'Hadar Soldier is hit/.test((c.querySelector("h3") || {}).textContent || ""));
+    ok(npcCard && /Avoid \(\d+ Threat\)/.test(npcCard.textContent), "Notable NPC hit: the GM gets Avoid (N Threat) or Accept");
+    M.ctx.isGM = false; await A.reload(); A.render();
+    ok(![...document.querySelectorAll(".card")].some(c => /^Jem'Hadar Soldier is hit/.test((c.querySelector("h3") || {}).textContent || "")), "players don't see the NPC's choice");
+    M.ctx.isGM = true; M.lib.Hits = {}; await A.reload();
     M.tokens.pc2.props.Injuries = "[]"; M.tokens.pc2.props.Stress = 0; M.tokens.pc2.props.Defeated = 0;
+    M.tokens.npc1.props.Injuries = "[]"; M.tokens.npc1.props.Defeated = 0;
+
+    // An out-of-date window warns, and players can't overwrite assists or extended tasks with the old whole-list write.
+    window.MockInstalledVersion = "9.9.9";
+    const warned = await until(() => /This window is out of date/.test(document.body.textContent) && /9\.9\.9 is installed/.test(document.body.textContent), 9000);
+    ok(warned, "a newer installed add-on shows the out-of-date warning");
+    window.MockInstalledVersion = ""; await until(() => !/This window is out of date/.test(document.body.textContent), 9000);
+    M.ctx.isGM = false;
+    r = await A.api("libSet", { values: { Assists: {}, Extended: { list: [] } } });
+    ok(r.ok === 0 && r.refused.join() === "Assists,Extended", "player libSet can't overwrite Assists or Extended (" + (r.refused || []).join() + ")");
+    M.ctx.isGM = true; await A.reload();
 
     // A supporting character with no Values is Defeated outright.
     M.tokens.npc1.props.Kind = "Supporting"; M.tokens.npc1.props.Values = "[]"; M.tokens.npc1.props.Injuries = "[]"; M.tokens.npc1.props.Defeated = 0; await A.reload();

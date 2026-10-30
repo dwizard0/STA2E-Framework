@@ -1,9 +1,9 @@
-[h: "STA2e API: write shared add-on data. Args: values (name to value). The GM may write any key. Players may write only what their own rolls change: banked assists, opposed rolls, extended-task progress, and clearing the one-time Difficulty modifier. Momentum and Threat go through api/poolAdd. Returns ok and the list of refused keys."]
+[h: "STA2e API: write shared add-on data. Args: values (name to value). The GM may write any key. Players may write only opposed rolls and clear the one-time Difficulty modifier. Momentum and Threat go through api/poolAdd, banked assists through api/assists, extended-task progress through api/extendedPatch; refusing them here stops an out-of-date window from overwriting them. Returns ok and the list of refused keys."]
 [h: ns = "lib:net.wizardsgate.sta2e"]
 [h: vals = json.get(macro.args, "values")]
 [h: keys = json.fields(vals, "json")]
 [h: gm = isGM()]
-[h: playerKeys = json.append("[]", "Assists", "Opposed", "Extended", "DiffOneTime")]
+[h: playerKeys = json.append("[]", "Opposed", "DiffOneTime")]
 [h: refused = "[]"]
 [h, foreach(k, keys), code: {
   [h: allowed = if(gm == 1, 1, json.contains(playerKeys, k))]
