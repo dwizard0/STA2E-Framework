@@ -1,5 +1,10 @@
 # Changelog
 
+## Core 1.8.1
+
+- A Notable NPC that has already avoided an Injury this scene no longer gets Avoid buttons, on the hit card or the Character tab. A new hit on it Defeats at once, as the rules say (p.347). Before, the buttons showed and were refused when clicked.
+- The hit card no longer reads "(Spend 4 Threat (once per scene).)".
+
 ## Core 1.8.0 (unreleased)
 
 ### Avoid Injury is offered to the target (p.292)
