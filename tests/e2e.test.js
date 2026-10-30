@@ -357,6 +357,11 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     S.tab = "gm"; A.render();
     btn(/^End scene$/).click(); await until(() => !Object.keys(M.lib.Assists || {}).length);
     ok(!Object.keys(M.lib.Assists || {}).length && !(M.lib.Opposed && M.lib.Opposed.value !== undefined), "End Scene clears banked assists and the opposed Difficulty");
+    // Another client banks an assist; the GM tab's Pending list shows it without pressing reload.
+    S.tab = "gm"; A.render();
+    M.lib.Assists = { pc1: [{ id: "bg", fromId: "pc2", fromName: "Dr. Yilil", tn: 10, critMax: 1, dice: [4], at: 4 }] };
+    const pendingSeen = await until(() => /Dr\. Yilil \u2192 Lt\. Jordan Vale|Dr\. Yilil.*Jordan Vale/.test(document.body.textContent), 9000);
+    ok(pendingSeen, "GM tab shows an assist banked on another client within a few seconds");
     M.lib.Extended = { list: [] }; M.lib.Assists = {}; M.lib.Opposed = null;
     ["ship1", "ship2"].forEach(id => { M.tokens[id].props.Effects = "[]"; });
     await A.reload(); S.tab = "roll";
