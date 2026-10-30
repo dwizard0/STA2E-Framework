@@ -438,6 +438,16 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     ok(npcCard && /Avoid \(\d+ Threat\)/.test(npcCard.textContent), "Notable NPC hit: the GM gets Avoid (N Threat) or Accept");
     M.ctx.isGM = false; await A.reload(); A.render();
     ok(![...document.querySelectorAll(".card")].some(c => /^Jem'Hadar Soldier is hit/.test((c.querySelector("h3") || {}).textContent || "")), "players don't see the NPC's choice");
+    ok(!/\.\)/.test(lastChat()), "hit card has no stray '.)' (" + lastChat().replace(/<[^>]+>/g, "").slice(0, 90) + ")");
+    // Once a Notable NPC has used its avoid this scene, no Avoid buttons, and a new hit Defeats at once (p.347).
+    M.ctx.isGM = true; M.lib.Hits = {}; M.lib.NpcAvoidUsed = { npc1: 1 }; M.tokens.npc1.props.Injuries = "[]"; M.tokens.npc1.props.Defeated = 0; await A.reload();
+    A.newRoll("pc1"); A.startAction(A.actionById("pc_ranged")); Object.assign(S.r, { attr: "Control", dept: "Security" });
+    S.r.atk.target = "npc1"; window.MockDice = [1, 2]; await A.doRoll();
+    await A.applyPersonalAttack(); S.r.result = null;
+    ok(Number(M.tokens.npc1.props.Defeated) === 1 && !Object.keys(M.lib.Hits || {}).length && /once per scene/.test(lastChat()), "Notable NPC that already avoided this scene: the hit Defeats at once");
+    S.tab = "character"; S.charId = "npc1"; A.render();
+    ok(![...document.querySelectorAll("button")].some(b => /^Avoid/.test(b.textContent)) && /Already avoided an Injury this scene/.test(document.body.textContent), "Character tab shows no Avoid button, and says why");
+    M.lib.NpcAvoidUsed = {};
     M.ctx.isGM = true; M.lib.Hits = {}; await A.reload();
     M.tokens.pc2.props.Injuries = "[]"; M.tokens.pc2.props.Stress = 0; M.tokens.pc2.props.Defeated = 0;
     M.tokens.npc1.props.Injuries = "[]"; M.tokens.npc1.props.Defeated = 0;

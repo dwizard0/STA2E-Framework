@@ -920,7 +920,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.NS = "net.wizardsgate.sta2e";
   A.CHAR_TYPE = "STA2e Character";
   A.SHIP_TYPE = "STA2e Ship";
-  A.VERSION = "1.8.0";
+  A.VERSION = "1.8.1";
 
   A.CHAR_PROPS = R.ATTRIBUTES.concat(R.DEPARTMENTS, ["Kind", "Species", "Rank", "Role", "Focuses", "Values", "Talents",
     "Stress", "StressBonus", "Determination", "Injuries", "Defeated", "FatiguedAttribute", "Protection", "Weapons", "Traits", "Notes",
@@ -1048,6 +1048,12 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   };
   A.canEdit = function (t) { return !!t && (S.ctx.isGM || t.owner); };
   // Minor NPCs, and supporting characters with no Values, are Defeated by any successful attack and can't Avoid Injury (p.291, p.347).
+  A.avoidOption = function (t, severity) {
+    var av = R.canAvoidInjury(t.p, severity);
+    if (av.ok && av.threat && t.p.Kind === "Notable NPC" && (S.lib.NpcAvoidUsed || {})[t.id])
+      return { ok: false, used: true, reason: "Already avoided an Injury this scene (Notable NPCs can once per scene)" };
+    return av;
+  };
   A.defeatedOutright = function (t) {
     return !!t && !t.isShip && (t.p.Kind === "Minor NPC" || (t.p.Kind === "Supporting" && !(Array.isArray(t.p.Values) && t.p.Values.length)));
   };
@@ -2147,7 +2153,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
           rows.push(A.esc(target.name) + " is <b>Defeated</b> (" + (kind === "deadly" ? "killed" : "unconscious") + ")" +
             (target.p.Kind === "Supporting" ? ": a supporting character with no Values can't Avoid Injury." : "."));
         } else {
-          var av = R.canAvoidInjury(target.p, sev), injName = w.name + (kind === "deadly" ? " wound" : " stun");
+          var av = A.avoidOption(target, sev), injName = w.name + (kind === "deadly" ? " wound" : " stun");
           // p.292: the target chooses to avoid the Injury or take it. When they can avoid it, it waits for that choice.
           newInj = { id: A.uid(), name: injName, severity: sev, kind: kind, treated: false, prevDefeated: target.p.Defeated ? 1 : 0 };
           if (av.ok) newInj.pending = 1;
@@ -2156,10 +2162,10 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
             (target.p.Protection && !piercing ? " (after Protection " + target.p.Protection + ")" : "");
           if (av.ok) {
             rows.push(A.esc(target.name) + " is hit: " + what + ".");
-            rows.push("<b>" + A.esc(target.name) + " chooses:</b> avoid it (" + A.esc(av.reason) + ") or accept it and be Defeated. The choice appears at the top of the STA 2E window for whoever controls " + A.esc(target.name) +
+            rows.push("<b>" + A.esc(target.name) + " chooses:</b> avoid it (" + A.esc(String(av.reason).replace(/\.\s*$/, "")) + ") or accept it and be Defeated. The choice appears at the top of the STA 2E window for whoever controls " + A.esc(target.name) +
               (av.threat ? " (the GM)" : "") + "; it's also on the Character tab's <b>Avoid</b> button.");
           } else {
-            rows.push(A.esc(target.name) + " suffers " + what + " and is Defeated" + (av.reason ? " (" + A.esc(av.reason) + ")" : "") + ".");
+            rows.push(A.esc(target.name) + " suffers " + what + " and is Defeated" + (av.reason ? " (" + A.esc(String(av.reason).replace(/\.\s*$/, "")) + ")" : "") + ".");
           }
         }
         var tch = { Injuries: inj };
@@ -3850,7 +3856,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     if (p.Injuries.length) {
       var tb = h("table", { class: "t" }, h("tr", null, h("th", null, "Injury"), h("th", null, "Sev"), h("th", null, "Type"), h("th", null, "Status"), h("th", null, "")));
       p.Injuries.forEach(function (inj) {
-        var av = R.canAvoidInjury(p, inj.severity);
+        var av = A.avoidOption(t, inj.severity);
         tb.appendChild(h("tr", null, h("td", null, inj.name), h("td", null, String(inj.severity)), h("td", null, inj.kind === "deadly" ? "Deadly" : "Stun"),
           h("td", null, inj.pending ? "Hit: avoid or accept" : inj.treated ? "Treated" : "Untreated"),
           h("td", null, ed ? h("div", { class: "row tight" },
@@ -3859,7 +3865,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
             h("button", { class: "btn small warn", onclick: function () { removeInjury(t, inj.id); } }, "Heal")) : null)));
       });
       ic.appendChild(tb);
-      if (!R.canAvoidInjury(p, 1).ok) ic.appendChild(h("div", { class: "small muted" }, R.canAvoidInjury(p, 1).reason));
+      if (!A.avoidOption(t, 1).ok) ic.appendChild(h("div", { class: "small muted" }, A.avoidOption(t, 1).reason + "."));
     } else ic.appendChild(h("div", { class: "small muted" }, "No injuries."));
     if (ed) {
       var nm = h("input", { type: "text", placeholder: "Injury name (e.g. Disruptor Burn)" });
@@ -3993,7 +3999,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (!t || !A.canEdit(t)) return;
       var inj = (t.p.Injuries || []).filter(function (i) { return i.id === hit.injuryId; })[0];
       if (!inj) return;
-      var av = R.canAvoidInjury(t.p, num(inj.severity, 1));
+      var av = A.avoidOption(t, num(inj.severity, 1));
       var card = h("div", { class: "card", style: "border-color:#b3261e" },
         h("h3", null, t.name + " is hit", h("span", { class: "sub" }, (hit.by ? "by " + hit.by + " \u00b7 " : "") + inj.name +
           " \u00b7 " + (inj.kind === "deadly" ? "Deadly" : "Stun") + " Injury, severity " + inj.severity)),
