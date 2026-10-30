@@ -357,6 +357,23 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     S.tab = "gm"; A.render();
     btn(/^End scene$/).click(); await until(() => !Object.keys(M.lib.Assists || {}).length);
     ok(!Object.keys(M.lib.Assists || {}).length && !(M.lib.Opposed && M.lib.Opposed.value !== undefined), "End Scene clears banked assists and the opposed Difficulty");
+    // Done on a successful extended roll marks the progress when "Mark N spaces" wasn't pressed.
+    M.ctx.isGM = true;
+    M.lib.Extended = { list: [{ id: "x3", kind: "task", name: "Done marks", track: 10, progress: 0, difficulty: 0, resistance: 0, breakthroughs: false, log: [] }] };
+    M.ctx.isGM = false; await A.reload();
+    A.startExtended("x3"); Object.assign(S.r, { tokenId: "pc1", attr: "Control", dept: "Engineering" }); S.tab = "roll"; A.render();
+    window.MockDice = [1, 2]; await A.doRoll();
+    const markBtn = btn(/^Mark \d+ space/), want = markBtn ? Number(markBtn.textContent.match(/\d+/)[0]) : -1;
+    A.finishRoll(); await until(() => !S.r.result);
+    ok(want > 0 && M.lib.Extended.list[0].progress === want && !S.r.result, "Done marks " + want + " spaces without pressing Mark (progress " + M.lib.Extended.list[0].progress + ")");
+    // A dropdown left "focused" after a redraw doesn't stop the refresh.
+    S.tab = "extended"; A.render();
+    const ghost = document.createElement("select"); document.body.appendChild(ghost); ghost.focus(); ghost.remove();
+    M.lib.Extended.list[0].progress = 9;
+    const ghostOk = await until(() => /Progress 9 \/ 10/.test(document.body.textContent), 9000);
+    ok(ghostOk, "refresh keeps running after a focused dropdown is removed from the page");
+    M.ctx.isGM = true; await A.reload();
+
     // Another client banks an assist; the GM tab's Pending list shows it without pressing reload.
     S.tab = "gm"; A.render();
     M.lib.Assists = { pc1: [{ id: "bg", fromId: "pc2", fromName: "Dr. Yilil", tn: 10, critMax: 1, dice: [4], at: 4 }] };
