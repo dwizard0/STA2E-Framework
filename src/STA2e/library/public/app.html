@@ -920,7 +920,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.NS = "net.wizardsgate.sta2e";
   A.CHAR_TYPE = "STA2e Character";
   A.SHIP_TYPE = "STA2e Ship";
-  A.VERSION = "1.7.1";
+  A.VERSION = "1.7.2";
 
   A.CHAR_PROPS = R.ATTRIBUTES.concat(R.DEPARTMENTS, ["Kind", "Species", "Rank", "Role", "Focuses", "Values", "Talents",
     "Stress", "StressBonus", "Determination", "Injuries", "Defeated", "FatiguedAttribute", "Protection", "Weapons", "Traits", "Notes",
@@ -1991,7 +1991,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   };
 
   A.finishRoll = function () {
-    var res = S.r.result, leftover = res.rollLeft;
+    var res = S.r.result;
+    if (A.extendedMarkOnDone && res && res.extendedId && res.success && !res.sac && !res.xApplied) {
+      return A.extendedMarkOnDone(res).then(function () { if (res.xApplied) A.finishRoll(); }).catch(A.fail);
+    }
+    var leftover = res.rollLeft;
     var bank = leftover > 0 ? (res.npc ? A.addPools(0, leftover) : A.addPools(leftover, 0)) : Promise.resolve(null);
     bank.then(function (pool) {
       var rows = [];
@@ -2776,9 +2780,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   };
 
   /* ---------- apply a successful roll to the extended task (called from the Roll tab) ---------- */
-  A.extendedApplyCard = function (res) {
-    var x = find(res.extendedId);
-    if (!x) return null;
+  function impactFor(res, x) {
     var t = A.tok(res.tokenId);
     var charDept = t ? (t.isShip ? (R.crewQualityRatings(t.p.CrewQuality || "Proficient") || { dept: 2 }).dept : num(t.p[res.dept], 0)) : 0;
     var shipDept = 0, shipName = "";
@@ -2792,6 +2794,22 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var comps = res.comps.filter(function (c) { return c !== "bought"; }).length;
     var bonus = num(x.bonusNext, 0);
     var impact = R.extendedImpact(dept, x.resistance, res.extra.progress || 0, comps, bonus);
+    return { impact: impact, dept: dept, comps: comps, bonus: bonus, charDept: charDept, shipDept: shipDept, shipName: shipName };
+  }
+
+  // Done marks the progress if the player hasn't pressed "Mark N spaces" already.
+  A.extendedMarkOnDone = function (res) {
+    if (!res || res.mode !== "task" || !res.success || res.sac || !res.extendedId || res.xApplied) return Promise.resolve();
+    var x = find(res.extendedId);
+    if (!x) return Promise.resolve();
+    return applyProgress(res, x, impactFor(res, x).impact);
+  };
+
+  A.extendedApplyCard = function (res) {
+    var x = find(res.extendedId);
+    if (!x) return null;
+    var im = impactFor(res, x), impact = im.impact, dept = im.dept, comps = im.comps, bonus = im.bonus;
+    var charDept = im.charDept, shipName = im.shipName, shipDept = im.shipDept;
     var card = h("div", { class: "card" }, h("h3", null, "Extended task", h("span", { class: "sub" }, x.name + " · " + x.progress + "/" + x.track)));
     card.appendChild(trackBar(x));
     if (res.xApplied) { card.appendChild(h("div", { class: "notice info" }, "Progress marked.")); return card; }
@@ -4307,8 +4325,12 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     // Keep the pools and the tokens on screen fresh for everyone (other players and the GM change them too).
     // While a roll result is open only the pools are re-read, so its Momentum figures stay current.
     // Skipped while saving or typing, and the window is only redrawn when something changed.
+    // MapTool's browser can leave a dropdown "focused" after the window redraws or the user clicks the map,
+    // which would pause the refresh for good; count only a field that's still on the page in a focused window.
     function typing() {
       var ae = document.activeElement, tag = ae && ae.tagName;
+      if (!ae || ae === document.body || !document.body.contains(ae)) return false;
+      if (typeof document.hasFocus === "function" && !document.hasFocus()) return false;
       return (tag === "INPUT" && ae.type !== "checkbox") || tag === "TEXTAREA" || tag === "SELECT";
     }
     setInterval(function () {

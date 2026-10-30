@@ -1,5 +1,10 @@
 # Changelog
 
+## Core 1.7.2 (unreleased)
+
+- **Done** on a successful extended-task roll now marks the progress if "Mark N spaces" wasn't pressed. Before, Done banked the Momentum and the progress was lost. Spend Momentum on Additional Progress before pressing Done.
+- The 6-second refresh no longer stalls in MapTool after a dropdown was used: MapTool's browser could keep the dropdown "focused" after a redraw, so the window thought the player was still typing and skipped every refresh. It now pauses only for a field that's still on the page while the window has focus.
+
 ## Core 1.7.1 (unreleased)
 
 - The window's 6-second refresh now redraws when banked assists, opposed rolls or extended tasks change on another client. Before, only Momentum, Threat, settings and on-screen tokens did, so the GM tab's Pending list needed ⟳.
