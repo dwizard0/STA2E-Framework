@@ -920,7 +920,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.NS = "net.wizardsgate.sta2e";
   A.CHAR_TYPE = "STA2e Character";
   A.SHIP_TYPE = "STA2e Ship";
-  A.VERSION = "1.7.2";
+  A.VERSION = "1.8.0";
 
   A.CHAR_PROPS = R.ATTRIBUTES.concat(R.DEPARTMENTS, ["Kind", "Species", "Rank", "Role", "Focuses", "Values", "Talents",
     "Stress", "StressBonus", "Determination", "Injuries", "Defeated", "FatiguedAttribute", "Protection", "Weapons", "Traits", "Notes",
@@ -934,7 +934,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     "CrewSupport", "Power", "Kind", "Talents", "Traits", "Weapons", "ShipWeapons", "Values", "Focuses"];
   A.JSON_PROPS = { Focuses: [], Values: [], Talents: [], Injuries: [], Weapons: [], Traits: [], Breaches: {}, ShipWeapons: [], Effects: [],
     TalentInfo: {}, TraitInfo: {} };
-  A.LIB_KEYS = ["Momentum", "Threat", "Assists", "DiffPersistent", "DiffOneTime", "Opposed", "ActiveShip", "Settings", "NpcAvoidUsed", "Extended"];
+  A.LIB_KEYS = ["Momentum", "Threat", "Assists", "DiffPersistent", "DiffOneTime", "Opposed", "ActiveShip", "Settings", "NpcAvoidUsed", "Extended", "Hits"];
   A.KINDS = ["Main", "Supporting", "Minor NPC", "Notable NPC", "Major NPC"];
 
   /* ---------------- MapTool bridge ---------------- */
@@ -970,7 +970,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   var S = A.S = {
     ctx: { isGM: true, player: "", tokens: [], selected: [], impersonated: "" },
     lib: { Momentum: 0, Threat: 0, Assists: {}, DiffPersistent: { value: 0, reason: "" }, DiffOneTime: { value: 0, reason: "" },
-      Opposed: null, ActiveShip: null, Settings: {}, NpcAvoidUsed: {}, Extended: [] },
+      Opposed: null, ActiveShip: null, Settings: {}, NpcAvoidUsed: {}, Extended: [], Hits: {} },
     tokens: {},      // id -> token model
     order: [],       // token ids in display order
     tab: "roll",
@@ -1128,6 +1128,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     // Extended tasks: stored as {list:[...]} so the data-store key stays an object.
     var ext = asJson(raw.Extended, { list: [] });
     L.Extended = (ext && Array.isArray(ext.list)) ? ext.list : [];
+    L.Hits = asJson(raw.Hits, {});
+    if (!L.Hits || typeof L.Hits !== "object" || Array.isArray(L.Hits)) L.Hits = {};
   };
 
   A.refreshPools = function () {
@@ -1157,6 +1159,15 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     return A.api("assists", { add: add || {}, remove: remove || {} }).then(function (res) {
       if (!res || !num(res.ok, 0)) throw new Error("MapTool didn't update the banked assists.");
       S.lib.Assists = (res.Assists && typeof res.Assists === "object") ? res.Assists : {};
+      return res;
+    });
+  };
+
+  // Hits waiting for the target's choice: avoid the Injury or accept it (api/hits). add: {hitId: hit}, remove: [hitId].
+  A.changeHits = function (add, remove) {
+    return A.api("hits", { add: add || {}, remove: remove || [] }).then(function (res) {
+      if (!res || !num(res.ok, 0)) throw new Error("MapTool didn't update the waiting hits.");
+      S.lib.Hits = (res.Hits && typeof res.Hits === "object" && !Array.isArray(res.Hits)) ? res.Hits : {};
       return res;
     });
   };
@@ -1430,7 +1441,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   var ctxOverride = { isGM: true };
   var SHARED_PROPS = ["Stress", "Injuries", "Defeated", "Shields", "Breaches", "Effects", "ReservePower", "ReroutedSystem", "RegainAttempts",
     "StressText", "StressPct", "DeterminationText", "Status", "InjuryList", "FocusList", "ShieldsText", "ShieldsPct", "Resistance", "PowerStatus", "BreachList", "EffectList"];
-  var PLAYER_LIB_KEYS = ["Assists", "Opposed", "Extended", "DiffOneTime"];
+  var PLAYER_LIB_KEYS = ["Opposed", "DiffOneTime"];   // as api/libSet.mts
 
   function call(name, args) {
     var out;
@@ -1503,6 +1514,17 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         var m1 = err ? m0 : Math.min(Math.max(m0 + dm, 0), 6), t1 = err ? t0 : Math.max(t0 + dt, 0);
         if (!err) { lib.Momentum = m1; lib.Threat = t1; }
         out = { ok: err ? 0 : 1, error: err, Momentum: m1, Threat: t1, dMomentum: m1 - m0, dThreat: t1 - t0 }; break;
+      }
+      case "version":
+        // Mirrors api/version.mts. Tests set MockInstalledVersion to act out a newer add-on.
+        out = { version: root.MockInstalledVersion || (root.App && root.App.VERSION) || "" }; break;
+      case "hits": {
+        // Mirrors api/hits.mts.
+        var hs = JSON.parse(JSON.stringify(lib.Hits && typeof lib.Hits === "object" ? lib.Hits : {}));
+        Object.keys(args.add || {}).forEach(function (k) { hs[k] = JSON.parse(JSON.stringify(args.add[k])); });
+        (args.remove || []).forEach(function (k) { delete hs[k]; });
+        lib.Hits = hs;
+        out = { ok: 1, Hits: JSON.parse(JSON.stringify(hs)) }; break;
       }
       case "assists": {
         // Mirrors api/assists.mts.
@@ -2120,19 +2142,34 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         var sev = R.injurySeverity(num(w.severity, 2) + res.extra.severity, target.p.Protection, piercing);
         var kind = w.injury === "both" ? res.atk.injury : w.injury;
         var inj = (target.p.Injuries || []).slice();
-        var rows = [];
+        var rows = [], newInj = null;
         if (A.defeatedOutright(target)) {
           rows.push(A.esc(target.name) + " is <b>Defeated</b> (" + (kind === "deadly" ? "killed" : "unconscious") + ")" +
             (target.p.Kind === "Supporting" ? ": a supporting character with no Values can't Avoid Injury." : "."));
         } else {
-          inj.push({ id: A.uid(), name: w.name + (kind === "deadly" ? " wound" : " stun"), severity: sev, kind: kind, treated: false,
-            prevDefeated: target.p.Defeated ? 1 : 0 });
-          rows.push(A.esc(target.name) + " suffers a <b>" + (kind === "deadly" ? "Deadly" : "Stun") + " Injury, severity " + sev + "</b>" +
-            (target.p.Protection && !piercing ? " (after Protection " + target.p.Protection + ")" : "") + " and is Defeated.");
-          var av = R.canAvoidInjury(target.p, sev);
-          if (av.ok) rows.push("They may Avoid Injury: " + A.esc(av.reason));
+          var av = R.canAvoidInjury(target.p, sev), injName = w.name + (kind === "deadly" ? " wound" : " stun");
+          // p.292: the target chooses to avoid the Injury or take it. When they can avoid it, it waits for that choice.
+          newInj = { id: A.uid(), name: injName, severity: sev, kind: kind, treated: false, prevDefeated: target.p.Defeated ? 1 : 0 };
+          if (av.ok) newInj.pending = 1;
+          inj.push(newInj);
+          var what = "a <b>" + (kind === "deadly" ? "Deadly" : "Stun") + " Injury, severity " + sev + "</b>" +
+            (target.p.Protection && !piercing ? " (after Protection " + target.p.Protection + ")" : "");
+          if (av.ok) {
+            rows.push(A.esc(target.name) + " is hit: " + what + ".");
+            rows.push("<b>" + A.esc(target.name) + " chooses:</b> avoid it (" + A.esc(av.reason) + ") or accept it and be Defeated. The choice appears at the top of the STA 2E window for whoever controls " + A.esc(target.name) +
+              (av.threat ? " (the GM)" : "") + "; it's also on the Character tab's <b>Avoid</b> button.");
+          } else {
+            rows.push(A.esc(target.name) + " suffers " + what + " and is Defeated" + (av.reason ? " (" + A.esc(av.reason) + ")" : "") + ".");
+          }
         }
-        return A.saveToken(target, { Injuries: inj, Defeated: 1 }).then(function () {
+        var tch = { Injuries: inj };
+        if (!newInj || !newInj.pending) tch.Defeated = 1;
+        return A.saveToken(target, tch).then(function () {
+          if (!newInj || !newInj.pending) return null;
+          var hit = {}; hit[A.uid()] = { tokenId: target.id, map: target.map, injuryId: newInj.id, target: target.name, injury: newInj.name,
+            severity: newInj.severity, kind: newInj.kind, by: res.name, at: Date.now() };
+          return A.changeHits(hit, null);
+        }).then(function () {
           res.applied = true;
           return A.chat(A.card(res.name + " hits " + target.name, w.name, rows, "#b3261e"));
         });
@@ -3815,7 +3852,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       p.Injuries.forEach(function (inj) {
         var av = R.canAvoidInjury(p, inj.severity);
         tb.appendChild(h("tr", null, h("td", null, inj.name), h("td", null, String(inj.severity)), h("td", null, inj.kind === "deadly" ? "Deadly" : "Stun"),
-          h("td", null, inj.treated ? "Treated" : "Untreated"),
+          h("td", null, inj.pending ? "Hit: avoid or accept" : inj.treated ? "Treated" : "Untreated"),
           h("td", null, ed ? h("div", { class: "row tight" },
             av.ok ? h("button", { class: "btn small", title: av.reason, onclick: function () { avoidInjury(t, inj, av); } }, av.threat ? "Avoid (" + av.threat + " Threat)" : "Avoid (" + inj.severity + " Stress)") : null,
             !inj.treated ? h("button", { class: "btn small", onclick: function () { editInjury(t, inj.id, { treated: true }); } }, "Treated") : null,
@@ -3897,10 +3934,21 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     }).then(A.render).catch(A.fail);
   }
 
+  // Hits waiting on this Injury (api/hits): cleared once the target has chosen.
+  function hitsFor(injuryId) {
+    var hits = S.lib.Hits || {};
+    return Object.keys(hits).filter(function (k) { return hits[k] && hits[k].injuryId === injuryId; });
+  }
+  function clearHits(injuryId) {
+    var ids = hitsFor(injuryId);
+    return ids.length ? A.changeHits(null, ids) : Promise.resolve();
+  }
+
+  // Resolves to true once the Injury is avoided and saved.
   function avoidInjury(t, inj, av) {
-    Promise.all([A.refreshTokens([t]), av.threat ? A.refreshPools() : null]).then(function () {
+    return Promise.all([A.refreshTokens([t]), av.threat ? A.refreshPools() : null]).then(function () {
       var p = t.p;
-      if (!(p.Injuries || []).some(function (i) { return i.id === inj.id; })) { A.toast(t.name + " no longer has that Injury."); return; }
+      if (!(p.Injuries || []).some(function (i) { return i.id === inj.id; })) { A.toast(t.name + " no longer has that Injury."); return clearHits(inj.id).then(function () { return false; }); }
       var list = p.Injuries.filter(function (i) { return i.id !== inj.id; });
       var ch = { Injuries: list };
       // Avoiding an Injury also prevents being Defeated by it (p.292): go back to how things were before it.
@@ -3908,8 +3956,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       else if (inj.prevDefeated !== undefined) ch.Defeated = inj.prevDefeated ? 1 : 0;
       var jobs = [], msg;
       if (av.threat) {
-        if (p.Kind === "Notable NPC" && S.lib.NpcAvoidUsed[t.id]) { A.toast("This Notable NPC already avoided an injury this scene."); return; }
-        if (S.lib.Threat < av.threat) { A.toast("Not enough Threat."); return; }
+        if (p.Kind === "Notable NPC" && S.lib.NpcAvoidUsed[t.id]) { A.toast("This Notable NPC already avoided an injury this scene."); return false; }
+        if (S.lib.Threat < av.threat) { A.toast("Not enough Threat."); return false; }
         jobs.push(A.addPools(0, -av.threat, true));
         if (p.Kind === "Notable NPC") { var u = Object.assign({}, S.lib.NpcAvoidUsed); u[t.id] = 1; jobs.push(A.saveLib({ NpcAvoidUsed: u })); }
         msg = t.name + " avoids the injury (GM spends " + av.threat + " Threat).";
@@ -3919,9 +3967,51 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         msg = t.name + " avoids the injury by taking " + s.taken + " Stress (" + s.stress + "/" + R.stressMax(p) + ")" + (s.complication ? " and suffers a complication (Stress track full)." : ".");
       }
       jobs.push(A.saveToken(t, ch));
-      return Promise.all(jobs).then(function () { return A.chat(A.card(t.name + ": Avoid Injury", inj.name, [A.esc(msg)], "#4cc38a")); });
-    }).then(A.render).catch(A.fail);
+      return Promise.all(jobs).then(function () { return clearHits(inj.id); })
+        .then(function () { return A.chat(A.card(t.name + ": Avoid Injury", inj.name, [A.esc(msg)], "#4cc38a")); })
+        .then(function () { return true; });
+    }).then(function (ok) { A.render(); return ok; }, function (e) { A.render(); try { A.fail(e); } catch (x) { /* shown */ } return false; });
   }
+
+  // Accept a waiting Injury: the character is Defeated (p.292).
+  function acceptInjury(t, injuryId) {
+    return A.refreshTokens([t]).then(function () {
+      var found = (t.p.Injuries || []).filter(function (i) { return i.id === injuryId; })[0];
+      if (!found) { A.toast(t.name + " no longer has that Injury."); return clearHits(injuryId); }
+      var list = t.p.Injuries.map(function (i) { return i.id === injuryId ? Object.assign({}, i, { pending: 0 }) : i; });
+      return A.saveToken(t, { Injuries: list, Defeated: 1 })
+        .then(function () { return clearHits(injuryId); })
+        .then(function () { return A.chat(A.card(t.name + " takes the Injury", found.name, [A.esc(t.name + " accepts a " + (found.kind === "deadly" ? "Deadly" : "Stun") + " Injury, severity " + found.severity + ", and is Defeated.")], "#b3261e")); });
+    }).then(A.render, function (e) { A.render(); try { A.fail(e); } catch (x) { /* shown */ } });
+  }
+
+  // A card at the top of the window for each hit waiting on a character this client controls.
+  A.hitPrompts = function () {
+    var hits = S.lib.Hits || {}, out = [];
+    Object.keys(hits).forEach(function (hid) {
+      var hit = hits[hid], t = hit && A.tok(hit.tokenId);
+      if (!t || !A.canEdit(t)) return;
+      var inj = (t.p.Injuries || []).filter(function (i) { return i.id === hit.injuryId; })[0];
+      if (!inj) return;
+      var av = R.canAvoidInjury(t.p, num(inj.severity, 1));
+      var card = h("div", { class: "card", style: "border-color:#b3261e" },
+        h("h3", null, t.name + " is hit", h("span", { class: "sub" }, (hit.by ? "by " + hit.by + " \u00b7 " : "") + inj.name +
+          " \u00b7 " + (inj.kind === "deadly" ? "Deadly" : "Stun") + " Injury, severity " + inj.severity)),
+        h("div", { class: "small" }, "Avoid the Injury, or accept it and be Defeated (p.292). " + (av.ok ? av.reason : "")));
+      var row = h("div", { class: "row", style: "margin-top:6px" });
+      if (av.ok && (!av.threat || S.ctx.isGM)) row.appendChild(h("button", { class: "btn small primary", disabled: A.busy, onclick: function () {
+        if (A.busy) return; A.busy = true;
+        avoidInjury(t, inj, av).then(function () { A.busy = false; A.render(); });
+      } }, av.threat ? "Avoid (" + av.threat + " Threat)" : "Avoid: take " + av.stress + " Stress"));
+      row.appendChild(h("button", { class: "btn small warn", disabled: A.busy, onclick: function () {
+        if (A.busy) return; A.busy = true;
+        acceptInjury(t, inj.id).then(function () { A.busy = false; A.render(); });
+      } }, "Accept the Injury"));
+      card.appendChild(row);
+      out.push(card);
+    });
+    return out;
+  };
   function editInjury(t, id, patch) {
     A.refreshTokens([t]).then(function () {
       var list = t.p.Injuries.map(function (i) { return i.id === id ? Object.assign({}, i, patch) : i; });
@@ -3932,7 +4022,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     A.refreshTokens([t]).then(function () {
       var list = t.p.Injuries.filter(function (i) { return i.id !== id; });
       return A.saveToken(t, { Injuries: list });
-    }).then(A.render).catch(A.fail);
+    }).then(function () { return clearHits(id); }).then(A.render).catch(A.fail);
   }
 
   /* ======================= SHIP ======================= */
@@ -4283,6 +4373,10 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (S.ctx.types === 0 && S.ctx.isGM) main.appendChild(h("div", { class: "notice bad" }, h("b", null, "The STA2e token types aren't in this campaign yet. "),
         "Characters and ships can't be created or converted until you add them: " + A.TYPES_HELP));
       else if (S.ctx.types === 1 && S.ctx.isGM) main.appendChild(h("div", { class: "notice" }, "This campaign has an older copy of the STA2e token types, without the hover stat sheet fields. Import STA2e-TokenTypes.mtprops again: " + A.TYPES_HELP));
+      if (S.installed && S.installed !== A.VERSION) main.appendChild(h("div", { class: "notice bad" },
+        h("b", null, "This window is out of date. "), "It's running STA 2E " + A.VERSION + " but " + S.installed +
+        " is installed. Close this window and type /sta to open the new one (restart MapTool if it still shows " + A.VERSION + "). Until then, rolls from this window can undo other players' changes."));
+      A.hitPrompts().forEach(function (c) { main.appendChild(c); });
       try {
         var content = S.tab === "actions" ? A.renderActions() : S.tab === "character" ? A.renderCharacter() :
           S.tab === "ship" ? A.renderShip() : S.tab === "extended" ? A.renderExtended() : S.tab === "gm" ? A.renderGM() : A.renderRoll();
@@ -4333,7 +4427,16 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (typeof document.hasFocus === "function" && !document.hasFocus()) return false;
       return (tag === "INPUT" && ae.type !== "checkbox") || tag === "TEXTAREA" || tag === "SELECT";
     }
+    // The installed add-on's version (api/version). A window left open across an update shows a warning.
+    function checkVersion() {
+      return A.api("version", {}).then(function (v) {
+        var iv = String(typeof v === "object" && v !== null ? (v.version || "") : v || "").trim();
+        if (iv && iv !== S.installed) { S.installed = iv; A.render(); }
+      }, function () { /* older add-on without api/version */ });
+    }
+    checkVersion();
     setInterval(function () {
+      checkVersion();
       if (A.busy || typing()) return;
       var open = !!(S.r && S.r.result);
       var shown = open ? [] : A.shownTokens();

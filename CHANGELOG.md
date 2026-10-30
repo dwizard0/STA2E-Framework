@@ -1,5 +1,24 @@
 # Changelog
 
+## Core 1.8.0 (unreleased)
+
+### Avoid Injury is offered to the target (p.292)
+- When an attack hits a character who can avoid the Injury, the hit **waits for their choice** instead of Defeating them at once. A red card appears at the top of the STA 2E window for whoever controls that character, on any tab, within about 6 seconds. It reads "*Name* is hit", with **Avoid: take N Stress** and **Accept the Injury**. Notable and Major NPCs get **Avoid (N Threat)** on the GM's window.
+- Until they choose, the character isn't Defeated. The Injury shows "Hit: avoid or accept" on the Character tab, and its Avoid button still works there.
+- **Accept** marks the character Defeated. **Avoid** removes the Injury, takes the Stress (or Threat), and leaves the character as they were before the hit.
+- The GM sees every waiting choice and can answer for a player who's away.
+- The hit card says who chooses and where.
+- Hits that can't be avoided (Minor NPCs, supporting characters with no Values, a full Stress track) Defeat at once, as before.
+- New `api/hits` macro keeps the waiting hits in shared data.
+
+### Out-of-date windows
+- A window left open across an update now warns: "This window is out of date. It's running STA 2E X but Y is installed…". It checks the new `api/version` macro every few seconds. An old window caused lost assists in testing.
+- `api/libSet` no longer lets players write banked assists or extended tasks. The current window uses `api/assists` and `api/extendedPatch` for those, so only an out-of-date window would still use the old whole-list write, and it's now refused.
+
+### Development
+- `tools/sync_shared.py` also keeps `api/version.mts` and the page's version in step with `library.json`; `--check` fails if they differ.
+- End-to-end tests for the waiting hit: avoid, accept, the GM's view, the NPC Threat choice and players not seeing it. Also tests for the version warning and the libSet refusal.
+
 ## Core 1.7.2 (unreleased)
 
 - **Done** on a successful extended-task roll now marks the progress if "Mark N spaces" wasn't pressed. Before, Done banked the Momentum and the progress was lost. Spend Momentum on Additional Progress before pressing Done.
