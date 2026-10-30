@@ -920,7 +920,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.NS = "net.wizardsgate.sta2e";
   A.CHAR_TYPE = "STA2e Character";
   A.SHIP_TYPE = "STA2e Ship";
-  A.VERSION = "1.7.0";
+  A.VERSION = "1.7.1";
 
   A.CHAR_PROPS = R.ATTRIBUTES.concat(R.DEPARTMENTS, ["Kind", "Species", "Rank", "Role", "Focuses", "Values", "Talents",
     "Stress", "StressBonus", "Determination", "Injuries", "Defeated", "FatiguedAttribute", "Protection", "Weapons", "Traits", "Notes",
@@ -4315,7 +4315,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (A.busy || typing()) return;
       var open = !!(S.r && S.r.result);
       var shown = open ? [] : A.shownTokens();
-      var snap = function () { return S.lib.Momentum + "/" + S.lib.Threat + JSON.stringify(S.lib.Settings || {}) + JSON.stringify(shown.map(function (t) { return t.raw; })); };
+      // Any shared data counts (pools, settings, banked assists, opposed rolls, extended tasks), plus the tokens on screen.
+      var snap = function () { return JSON.stringify(S.lib) + JSON.stringify(shown.map(function (t) { return t.raw; })); };
       var before = snap();
       Promise.all([A.refreshPools(), shown.length ? A.refreshTokens(shown).catch(function () {}) : null]).then(function () {
         if (A.busy || typing() || !!(S.r && S.r.result) !== open) return;

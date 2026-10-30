@@ -1,5 +1,9 @@
 # Changelog
 
+## Core 1.7.1 (unreleased)
+
+- The window's 6-second refresh now redraws when banked assists, opposed rolls or extended tasks change on another client. Before, only Momentum, Threat, settings and on-screen tokens did, so the GM tab's Pending list needed ⟳.
+
 ## Core 1.7.0 / Remote 0.6.3 (unreleased)
 
 ### Character rules
