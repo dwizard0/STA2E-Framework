@@ -385,17 +385,26 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
 
     // ---- 13. Characters: Recover Stress cap, Avoid Injury and Defeated, Supporting without Values, Succeed at Cost ----
     const pick = (sel, value) => { sel.value = value; sel.dispatchEvent(new Event("change", { bubbles: true })); };
-    M.lib.Momentum = 6; M.tokens.pc2.props.Stress = 5; await A.reload();
+    M.lib.Momentum = 10; M.tokens.pc2.props.Stress = 5; await A.reload();
     A.newRoll("pc1"); Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 1 }); S.tab = "roll"; A.render();
     window.MockDice = [1, 2]; await A.doRoll();
     for (let i = 1; i <= 2; i++) { btn(/^Recover 1 Stress/).click(); await until(() => S.r.result.extra.stressBought === i); }
     const stressSel = [...document.querySelectorAll("select")].find(x => [...x.options].some(o => o.value === "pc2"));
     pick(stressSel, "pc2"); await until(() => Number(M.tokens.pc2.props.Stress) === 3);
     ok(Number(M.tokens.pc2.props.Stress) === 3, "2 Stress recovered for Dr. Yilil (5 -> " + M.tokens.pc2.props.Stress + ")");
-    ok(!btn(/^Recover 1 Stress/).disabled, "a third can still be bought");
-    btn(/^Recover 1 Stress/).click(); await until(() => S.r.result.extra.stressBought === 3);
-    ok(btn(/^Recover 1 Stress/).disabled && /3 of 3/.test(document.body.textContent), "after 3 in total on this task, Recover Stress can't be bought again");
+    ok(!btn(/^Recover 1 Stress/).disabled && /Dr\. Yilil 2 of 3/.test(document.body.textContent), "more can still be bought, and the card says Dr. Yilil has had 2 of 3");
+    // The cap is 3 per character from one task (p.278), not 3 in total: the rest goes to someone else.
+    M.tokens.pc1.props.Stress = 2;
+    for (let i = 3; i <= 4; i++) { btn(/^Recover 1 Stress/).click(); await until(() => S.r.result.extra.stressBought === i); }
+    const stressSel2 = () => [...document.querySelectorAll("select")].find(x => [...x.options].some(o => o.value === "pc2" || o.value === "pc1"));
+    pick(stressSel2(), "pc2"); await until(() => Number(M.tokens.pc2.props.Stress) === 2);
+    ok(Number(M.tokens.pc2.props.Stress) === 2 && S.r.result.extra.stressFix === 1, "Dr. Yilil takes only her third (Stress " + M.tokens.pc2.props.Stress + "); 1 is left to give");
+    await until(() => !!stressSel2() && ![...stressSel2().options].some(o => o.value === "pc2"));
+    ok(![...stressSel2().options].some(o => o.value === "pc2") && [...stressSel2().options].some(o => o.value === "pc1"), "she's no longer offered; Lt. Vale still is");
+    pick(stressSel2(), "pc1"); await until(() => Number(M.tokens.pc1.props.Stress) === 1);
+    ok(Number(M.tokens.pc1.props.Stress) === 1 && S.r.result.extra.stressFix === 0, "the leftover Stress recovery goes to another character");
     A.finishRoll(); await until(() => !S.r.result);
+    M.tokens.pc1.props.Stress = 0; await A.reload();
 
     // A hit that can be avoided waits for the target's choice (p.292). Dr. Yilil had an older, treated Injury and was back on her feet.
     M.tokens.pc2.props.Stress = 0; M.tokens.pc2.props.Defeated = 0; M.lib.Hits = {};
@@ -488,6 +497,132 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     ok(S.r.result && !S.r.result.success && !!btn(/^Succeed at Cost$/), "Regain Power allows Succeed at Cost without the setting");
     S.r.result = null; M.ctx.isGM = true; M.tokens.ship1.props.ReservePower = 1; M.tokens.ship1.props.RegainAttempts = 0;
     await A.reload(); S.tab = "roll";
+
+    // ---- 14. 1.8.2: second-review fixes ----
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const injOf = (id) => JSON.parse(M.tokens[id].props.Injuries || "[]");
+    const hitShown = (name) => [...document.querySelectorAll(".card")].some(c => new RegExp("^" + name + " is hit").test((c.querySelector("h3") || {}).textContent || ""));
+    const fresh = async (gm) => {
+      M.ctx.isGM = gm; M.lib.Hits = {}; M.lib.Momentum = 2; M.lib.Threat = 6; M.lib.NpcAvoidUsed = {}; M.lib.Settings = {}; M.lib.Extended = { list: [] }; M.lib.Opposed = null;
+      ["pc1", "pc2", "npc1"].forEach(id => { const p = M.tokens[id].props; p.Injuries = "[]"; p.Defeated = 0; p.Stress = 0; });
+      ["ship1", "ship2"].forEach(id => { const p = M.tokens[id].props; p.Effects = "[]"; p.Breaches = "{}"; p.ReservePower = 1; delete p.Shields; });
+      if (S.r) S.r.result = null;
+      await A.reload(); A.newRoll("pc1"); S.charId = "pc1"; S.tab = "roll"; A.render();
+    };
+    const hitFromElsewhere = (id, hid) => {   // what another client's attack leaves behind
+      const list = injOf(id); list.push({ id: "inj-" + hid, name: "Test wound", severity: 2, kind: "stun", treated: false, prevDefeated: 0, pending: 1 });
+      M.tokens[id].props.Injuries = JSON.stringify(list);
+      const hs = Object.assign({}, M.lib.Hits || {}); hs[hid] = { tokenId: id, map: M.tokens[id].map, injuryId: "inj-" + hid, target: M.tokens[id].name, by: "Someone" };
+      M.lib.Hits = hs;
+    };
+
+    // The hit choice reaches the window even when the hit token isn't on screen, or a result is open.
+    await fresh(true);
+    hitFromElsewhere("npc1", "h1");
+    ok(await until(() => hitShown("Jem'Hadar Soldier"), 9000), "GM looking at another token: the NPC's hit card appears by itself");
+    await fresh(false);
+    Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 1 }); window.MockDice = [3, 4]; await A.doRoll();
+    hitFromElsewhere("pc1", "h2");
+    ok(await until(() => hitShown("Lt. Jordan Vale"), 9000) && !!S.r.result, "player with a roll result open: their hit card appears, and the result stays open");
+    // A hit on a token that has since been deleted doesn't stop the refresh.
+    await fresh(true);
+    M.lib.Hits = { gone: { tokenId: "nope", map: "Bridge", injuryId: "x", target: "Ghost", by: "Someone" } };
+    hitFromElsewhere("npc1", "h3");
+    ok(await until(() => hitShown("Jem'Hadar Soldier"), 9000), "a waiting hit on a deleted token doesn't block the others");
+
+    // Result buttons pressed twice act once.
+    await fresh(true);
+    Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 0 }); window.MockDice = [1, 2]; await A.doRoll();
+    const left14 = S.r.result.rollLeft; M.lib.Momentum = 0; await A.refreshPools();
+    A.finishRoll(); A.finishRoll(); await until(() => !S.r.result); await wait(300);
+    ok(left14 === 3 && M.lib.Momentum === 3, "Done pressed twice banks the roll's Momentum once (" + left14 + " left, pool " + M.lib.Momentum + ")");
+    await fresh(true);
+    Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 1 }); window.MockDice = [3, 20]; await A.doRoll();
+    A.buyOffComplication(0); A.buyOffComplication(0); await until(() => S.r.result.comps[0] === "bought"); await wait(300);
+    ok(M.lib.Threat === 8, "'Add 2 Threat to avoid' pressed twice adds 2 Threat (6 -> " + M.lib.Threat + ")");
+    await fresh(true);
+    M.tokens.pc2.props.Determination = 2; await A.reload(); A.newRoll("pc2");
+    Object.assign(S.r, { attr: "Control", dept: "Medicine", baseDiff: 1 }); window.MockDice = [15, 16, 5, 6, 7, 8]; await A.doRoll();
+    S.r.result.pick = { 0: true }; A.rerollPicked("determination"); A.rerollPicked("determination");
+    await until(() => Number(M.tokens.pc2.props.Determination) < 2); await wait(300);
+    ok(Number(M.tokens.pc2.props.Determination) === 1, "Determination re-roll pressed twice spends 1 Determination (2 -> " + M.tokens.pc2.props.Determination + ")");
+    await fresh(true);
+    M.lib.Opposed = { value: 3, fromId: "pc2", fromName: "Dr. <Yilil>", at: 1 }; await A.refreshPools();
+    A.newRoll("npc1"); Object.assign(S.r, { attr: "Control", dept: "Security" }); window.MockDice = [19, 18]; await A.doRoll();
+    M.lib.Momentum = 0; await A.refreshPools(); A.render();
+    A.giveReactiveMomentum(); A.giveReactiveMomentum(); await until(() => S.r.result.reactiveGiven); await wait(300);
+    ok(M.lib.Momentum === 3, "'Give 3 Momentum' pressed twice gives 3 (pool " + M.lib.Momentum + ")");
+    ok(/Dr\. &lt;Yilil&gt; gains/.test(lastChat()), "the opposed-task card escapes the winner's name");
+    // A failed save doesn't leave the buttons dead.
+    await fresh(true);
+    Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 1 }); window.MockDice = [3, 20]; await A.doRoll();
+    const realAdd = A.addPools; A.addPools = () => Promise.reject(new Error("MapTool didn't answer"));
+    try { await A.buyOffComplication(0); } catch (e) { }
+    A.addPools = realAdd;
+    await A.buyOffComplication(0);
+    ok(S.r.result.comps[0] === "bought" && M.lib.Threat === 8, "after a failed save the button works again");
+
+    // Two hits waiting on one character: accepting one and avoiding the other leaves them Defeated.
+    await fresh(true);
+    for (const n of [1, 2]) {
+      A.newRoll("npc1"); A.startAction(A.actionById("pc_ranged")); Object.assign(S.r, { attr: "Control", dept: "Security" });
+      S.r.atk.target = "pc2"; window.MockDice = [1, 2]; await A.doRoll(); await A.applyPersonalAttack(); S.r.result = null;
+    }
+    A.render();
+    const yCards = () => [...document.querySelectorAll(".card")].filter(c => /^Dr\. Yilil is hit/.test((c.querySelector("h3") || {}).textContent || ""));
+    const two = yCards().length === 2;
+    [...yCards()[0].querySelectorAll("button")].find(b => b.textContent === "Accept the Injury").click();
+    await until(() => Number(M.tokens.pc2.props.Defeated) === 1); await until(() => yCards().length === 1);
+    [...yCards()[0].querySelectorAll("button")].find(b => /^Avoid/.test(b.textContent)).click();
+    await until(() => injOf("pc2").length === 1); await wait(200);
+    ok(two && injOf("pc2").length === 1 && Number(M.tokens.pc2.props.Defeated) === 1, "accept one hit, avoid the other: one Injury, still Defeated (" + M.tokens.pc2.props.Defeated + ")");
+
+    // Extended task: Done after Succeed at Cost marks the progress; Done after the task was removed still finishes.
+    await fresh(true);
+    M.lib.Extended = { list: [{ id: "x14", kind: "task", name: "X", track: 10, progress: 0, difficulty: 4, resistance: 0, breakthroughs: false, log: [] }] }; await A.refreshPools();
+    A.startExtended("x14"); Object.assign(S.r, { tokenId: "pc1", attr: "Control", dept: "Engineering" }); window.MockDice = [15, 16]; await A.doRoll();
+    A.succeedAtCost(); await wait(100);
+    const offered14 = !!btn(/^Mark \d+ space/);
+    A.finishRoll(); await until(() => !S.r.result, 2000);
+    ok(offered14 && !S.r.result && M.lib.Extended.list[0].progress > 0, "Done after Succeed at Cost marks the progress (" + M.lib.Extended.list[0].progress + ")");
+    await fresh(false);
+    M.lib.Extended = { list: [{ id: "x15", kind: "task", name: "Y", track: 10, progress: 0, difficulty: 0, resistance: 0, breakthroughs: false, log: [] }] }; await A.refreshPools();
+    A.startExtended("x15"); Object.assign(S.r, { tokenId: "pc1", attr: "Control", dept: "Engineering" }); window.MockDice = [1, 2]; await A.doRoll();
+    const left15 = S.r.result.rollLeft;
+    M.lib.Extended = { list: [] }; await A.refreshPools(); A.render();
+    A.finishRoll(); const closed15 = await until(() => !S.r.result, 2500);
+    ok(closed15 && M.lib.Momentum === 2 + left15 && [...document.querySelectorAll(".toast")].some(x => /was removed/.test(x.textContent)),
+      "Done after the GM removed the task: says so, banks the Momentum (pool " + M.lib.Momentum + ") and closes");
+
+    // A free bonus die uses the first purchase slot (p.255).
+    await fresh(true);
+    M.lib.Momentum = 6; await A.refreshPools();
+    Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 1, bonusDice: 1, buy: [1, 1, 0] }); A.render();
+    const slots14 = [...document.querySelectorAll(".buyslot")].map(x => x.textContent);
+    ok(/2 Momentum/.test(slots14[0]) && /3 Momentum/.test(slots14[1]), "with 1 free die, the bought dice are labelled 2 and 3 Momentum (" + slots14.slice(0, 2).join(", ") + ")");
+    window.MockDice = [9, 9, 9, 9, 9]; await A.doRoll();
+    ok(S.r.result.dice.length === 5 && M.lib.Momentum === 1, "1 free die + 2 bought costs 2 + 3 = 5 Momentum (paid " + (6 - M.lib.Momentum) + ")");
+    S.r.result = null; M.lib.Momentum = 6; M.lib.Settings = { freeDiceCheap: true }; await A.reload(); A.newRoll("pc1");
+    Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 1, bonusDice: 1, buy: [1, 1, 0] }); window.MockDice = [9, 9, 9, 9, 9]; await A.doRoll();
+    ok(M.lib.Momentum === 3, "with the GM's house rule on, the same roll costs 1 + 2 = 3 (paid " + (6 - M.lib.Momentum) + ")");
+
+    // Ram shakes both ships.
+    await fresh(true);
+    M.tokens.ship1.props.Shields = Math.ceil(Rules.shieldsMax(A.tok("ship1").p) / 2); await A.reload();   // one more hit takes her below half
+    A.newRoll("pc1"); A.startAction(A.actionById("helm_ram")); S.r.atk.target = "ship2"; S.r.atk.zones = 8; window.MockDice = [1, 1, 1]; await A.doRoll();
+    await A.applySimpleEffect();
+    const fx = (id) => JSON.parse(M.tokens[id].props.Effects || "[]");
+    ok(fx("ship2").length > 0 && /Shaken/i.test(lastChat()), "Ram: the target is Shaken (" + fx("ship2").length + " effect) and the card says so");
+    ok(fx("ship1").length > 0, "Ram: the ramming ship is Shaken too (" + fx("ship1").length + " effect)");
+
+    // The players' ship isn't offered under "Rolling as".
+    await fresh(false);
+    A.newRoll("ship1"); S.tab = "roll"; A.render();
+    const rollAs = [...document.querySelectorAll("select")][0];
+    ok(![...rollAs.options].some(o => o.value === "ship1") && S.r.tokenId !== "ship1" && ![...document.querySelectorAll(".card h3")].some(x => /NPC ship crew/.test(x.textContent)),
+      "the players' ship isn't a choice under Rolling as (now " + S.r.tokenId + ")");
+    ok([...rollAs.options].some(o => o.value === "ship2"), "an NPC-crewed ship still is");
+    await fresh(true); M.tokens.pc2.props.Determination = 1; await A.reload(); S.tab = "roll";
     return out;
   }, VERSION);
   results.forEach(l => console.log(l));
@@ -523,6 +658,31 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     const sc = await A.remoteRunners.rollAction("c1", { rollId: fl.rollId, action: "sac" });
     ok(sc && sc.sac, "allowed once the GM turns it on");
     M.lib.Settings = {};
+    await A.remoteRunners.rollAction("c1", { rollId: fl.rollId, action: "finish" });
+
+    // 1.8.2: a free bonus die uses the first purchase slot (p.255)
+    M.lib.Momentum = 6; window.MockDice = [9, 9, 9, 9, 9];
+    const fd = await A.remoteRunners.roll("c1", { tokenId: "pc1", attr: "Control", dept: "Engineering", difficulty: 1, bonusDice: 1, buy: 2 });
+    ok(M.lib.Momentum === 1, "1 free die + 2 bought costs 5 Momentum (paid " + (6 - M.lib.Momentum) + ")");
+    await A.remoteRunners.rollAction("c1", { rollId: fd.rollId, action: "finish" });
+    M.lib.Settings = { freeDiceCheap: true }; M.lib.Momentum = 6; window.MockDice = [9, 9, 9, 9, 9];
+    const fd2 = await A.remoteRunners.roll("c1", { tokenId: "pc1", attr: "Control", dept: "Engineering", difficulty: 1, bonusDice: 1, buy: 2 });
+    ok(M.lib.Momentum === 3, "with the GM's house rule on it costs 3 (paid " + (6 - M.lib.Momentum) + ")");
+    await A.remoteRunners.rollAction("c1", { rollId: fd2.rollId, action: "finish" });
+    M.lib.Settings = {};
+
+    // 1.8.2: Recover Stress is capped at 3 per character from one task, not 3 in total
+    M.lib.Momentum = 12; M.tokens.pc1.props.Stress = 5; M.tokens.pc2.props.Stress = 2; await A.loadAll(); window.MockDice = [1, 2];
+    const sr = await A.remoteRunners.roll("c1", { tokenId: "pc1", attr: "Control", dept: "Engineering", difficulty: 1 });
+    let sv = null;
+    for (let i = 0; i < 3; i++) sv = await A.remoteRunners.rollAction("c1", { rollId: sr.rollId, action: "spend", key: "stress", target: "pc1" });
+    ok(Number(M.tokens.pc1.props.Stress) === 2 && sv.stressFixed < 3, "3 Stress recovered for one character; the spend stays open for others (Stress " + M.tokens.pc1.props.Stress + ")");
+    err = ""; try { await A.remoteRunners.rollAction("c1", { rollId: sr.rollId, action: "spend", key: "stress", target: "pc1" }); } catch (e) { err = e.message; }
+    ok(/already recovered 3/.test(err) && Number(M.tokens.pc1.props.Stress) === 2, "a fourth for the same character is refused");
+    sv = await A.remoteRunners.rollAction("c1", { rollId: sr.rollId, action: "spend", key: "stress", target: "pc2" });
+    ok(Number(M.tokens.pc2.props.Stress) === 1 && sv.stressBy.pc1 === 3 && sv.stressBy.pc2 === 1, "another character can still recover from the same task");
+    await A.remoteRunners.rollAction("c1", { rollId: sr.rollId, action: "finish" });
+    M.tokens.pc1.props.Stress = 0; M.tokens.pc2.props.Stress = 0;
     return out;
   });
   r2.forEach(l => console.log(l));

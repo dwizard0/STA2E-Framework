@@ -1,5 +1,38 @@
 # Changelog
 
+## Core 1.8.2 / Remote 0.6.4
+
+Bug fixes from the second review. Each has an end-to-end test.
+
+### The hit choice always arrives
+- The "*Name* is hit" card now appears by itself whichever token the window is showing. Before, the GM only saw an NPC's choice if that NPC happened to be on screen, and otherwise had to press ⟳.
+- It also appears while a roll result is open. Before, a player in the middle of spending Momentum didn't see their own character's hit until they pressed Done.
+- A waiting hit on a token that has since been deleted no longer stops the others refreshing.
+
+### Buttons pressed twice
+- **Done**, **Add 2 Threat to avoid**, the re-rolls, Momentum spends, **Give N Momentum** and the Ship tab's Incoming damage **Apply** now act once however fast they're clicked. Before, a double-click on Done banked the roll's Momentum twice, and a double-click on the Determination re-roll spent 2 Determination.
+
+### Rules
+- **A free bonus die uses the first purchase slot (p.255).** With one free die from a talent, the next bought die costs 2 and the one after 3. Before, bought dice always started at 1. The buy buttons show each die's price. GM → Settings has a house rule to keep the old, cheaper reading. The remote add-on charges the same way.
+- **Recover Stress is capped at 3 per character from one task (p.278)**, not 3 in total. What one character can't take stays to give to someone else, and the card shows how many each has had. Same in the remote add-on.
+- **Ram shakes both ships** when the collision takes their shields below half or a quarter, like any other damage. Before, Ram never applied Shaken.
+- **Devastating Attack's extra hit keeps the weapon's Depleting quality**, so it can't shake the target.
+- Avoiding one hit while another hit on the same character has been accepted leaves them Defeated. Before, the avoid cleared Defeated.
+
+### Extended tasks
+- **Done** after **Succeed at Cost** marks the progress. Before, it closed the roll and the progress was lost.
+- If the GM removed the extended task while the result was open, Done says so, saves the Momentum and closes. Before, the result stayed open with no message.
+
+### Rolling as
+- The players' ship is no longer offered under "Rolling as": it assists a character's roll and doesn't roll for itself. Ships with an NPC crew are still listed.
+
+### Smaller
+- Character names are escaped in the opposed-task and extended-task chat cards.
+
+### Remote add-on, for whoever hosts the player page
+- The roll view's `allies` entries gain `recovered` (Stress recovered from this task), and the view gains `stressBy`. `stressFixed` is still sent for older player pages; it reaches 3 only when no one can recover any more.
+- A player page that shows the price of bought dice should add the free bonus dice first. The GM's window is what charges, and its "Not enough Momentum" message now states the cost.
+
 ## Core 1.8.1
 
 - A Notable NPC that has already avoided an Injury this scene no longer gets Avoid buttons, on the hit card or the Character tab. A new hit on it Defeats at once, as the rules say (p.347). Before, the buttons showed and were refused when clicked.

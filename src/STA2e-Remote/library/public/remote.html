@@ -244,9 +244,9 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
   function dieCost(n) { return n; }
   // Total cost for buying `count` extra dice, given `free` bonus dice already in the pool.
   // Bonus dice from talents still count toward the 3 purchasable dice (p.255 "Talents").
-  function purchaseCost(count) {
-    var total = 0;
-    for (var i = 1; i <= count; i++) total += dieCost(i);
+  function purchaseCost(count, free) {
+    var total = 0, f = Math.max(0, Number(free) || 0);
+    for (var i = 1; i <= count; i++) total += dieCost(f + i);
     return total;
   }
   function maxPurchasable(baseDice, bonusDice) {
@@ -1747,9 +1747,18 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     if (!res.spentLog.length) { res.rollLeft = res.momentumRoll; res.bonusLeft = res.success && !res.sac ? res.bonusMomentum : 0; }
     return res;
   }
-  function allies() {
+  // p.278: Recover Stress is capped at 3 per character from one task. `res` (optional) adds how many each has had.
+  var STRESS_CAP = 3;
+  function stressGiven(res, id) { return num(((res && res.stressBy) || {})[id], 0); }
+  function allies(res) {
     return A.chars().filter(function (t) { return t.isSTA && R.stressMax(t.p) > 0 && (t.p.Kind === "Main" || t.p.Kind === "Supporting"); })
-      .map(function (t) { return { id: t.id, name: t.name, stress: t.p.Stress, stressMax: R.stressMax(t.p) }; });
+      .map(function (t) { return { id: t.id, name: t.name, stress: t.p.Stress, stressMax: R.stressMax(t.p), recovered: stressGiven(res, t.id) }; });
+  }
+  // What older player pages read as "Stress recovered from this task": it reaches the cap only when no one
+  // can recover any more, so the spend stays available while another character still can.
+  function stressFixedView(res) {
+    var open = allies(res).filter(function (a) { return a.stress > 0 && a.recovered < STRESS_CAP; });
+    return open.length ? Math.min.apply(null, open.map(function (a) { return a.recovered; })) : STRESS_CAP;
   }
   function rollView(res, finished) {
     var ev = res.ev, t = A.tok(res.tokenId);
@@ -1760,11 +1769,11 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       dice: ev.leaderDice.map(dv), successes: ev.successes, success: res.success, sac: !!res.sac, shutdown: res.shutdown,
       momentum: res.momentumRoll, rollLeft: res.rollLeft, bonusLeft: res.bonusLeft, bonusMomentum: res.bonusLeft,
       pool: S.lib.Momentum, comps: res.comps.slice(), complications: res.comps.filter(function (c) { return c === "open"; }).length,
-      spentLog: res.spentLog.slice(), canReroll: !res.spentLog.length && !finished, stressFixed: res.stressFixed || 0,
+      spentLog: res.spentLog.slice(), canReroll: !res.spentLog.length && !finished, stressFixed: stressFixedView(res), stressBy: res.stressBy || {},
       determination: t ? t.p.Determination : 0, kind: t ? t.p.Kind : "", perfect: res.perfect,
       ship: ev.ship ? { name: ev.ship.name, dice: ev.ship.dice.map(dv), successes: ev.ship.successes, rerouted: ev.ship.rerouted, counted: ev.helpersCount } : null,
       spends: res.success && !res.sac ? SPENDS.map(function (x) { return { key: x.key, label: x.label, cost: x.cost, max: x.max || 0 }; }) : [],
-      allies: res.success && !res.sac ? allies() : []
+      allies: res.success && !res.sac ? allies(res) : []
     };
     if (finished) { v.banked = res.banked || 0; v.lost = res.lost || 0; }
     return v;
@@ -1804,7 +1813,7 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     var payThreat = cmd.pay === "threat";
     var perfect = !!cmd.perfect;
     if (perfect && (p.Kind !== "Main" || p.Determination < 1)) throw new Error("No Determination to spend.");
-    var cost = R.purchaseCost(buy);
+    var cost = 0;
     var sh = null;
     if (cmd.ship) {
       var ship = A.activeShip();
@@ -1818,7 +1827,10 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     // A new roll closes any roll this connection left open (its Momentum is saved).
     var before = X.open[cid] ? finishOpen(cid, "started another roll") : Promise.resolve();
     return before.then(function () { return A.refreshPools(); }).then(function () {
-      if (!payThreat && cost > S.lib.Momentum) throw new Error("Not enough Momentum in the pool (" + S.lib.Momentum + ") to buy " + buy + " dice. Pay with Threat instead.");
+      // p.255: a free bonus die uses the first purchase slot, so the next die costs 2 (unless the GM's house rule is on).
+      var freeCheap = !!(S.lib.Settings && S.lib.Settings.freeDiceCheap);
+      cost = R.purchaseCost(buy, freeCheap ? 0 : bonusDice);
+      if (!payThreat && cost > S.lib.Momentum) throw new Error("Not enough Momentum in the pool (" + S.lib.Momentum + ") to buy " + buy + " dice (" + cost + " Momentum" + (bonusDice && !freeCheap ? ", as the free bonus dice use the cheapest slots" : "") + "). Pay with Threat instead.");
       var mx = R.stressMax(p), fatigued = mx > 0 && p.Stress >= mx;
       var base = R.clamp(num(cmd.difficulty, 1), 0, 5), total = base, parts = ["Base " + base];
       var dp = S.lib.DiffPersistent || {}, dot = S.lib.DiffOneTime || {};
@@ -1841,7 +1853,7 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
           difficulty: total, parts: parts, compRange: compRange, dice: dice, perfect: perfect, bonusDice: bonusDice,
           buy: buy, cost: cost, payThreat: payThreat, bonusMomentum: bonusMomentum, label: String(cmd.label || "").slice(0, 80),
           shipSpec: sh ? { name: sh.name, tn: sh.tn, critMax: sh.critMax, dice: [sh.rerouted ? 1 : vals[rollN]], rerouted: sh.rerouted } : null,
-          comps: [], sac: false, spentLog: [], rollLeft: 0, bonusLeft: 0, stressFixed: 0
+          comps: [], sac: false, spentLog: [], rollLeft: 0, bonusLeft: 0, stressBy: {}
         };
         evalOpen(res);
         touch(res);
@@ -1945,9 +1957,9 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       if (!sp) throw new Error("Unknown Momentum spend.");
       var target = null;
       if (sp.key === "stress") {
-        if ((res.stressFixed || 0) >= sp.max) throw new Error("At most " + sp.max + " Stress can be recovered from one task.");
         target = A.tok(String(cmd.target || ""));
         if (!target || !allies().some(function (a) { return a.id === target.id; })) throw new Error("Pick who recovers the Stress.");
+        if (stressGiven(res, target.id) >= sp.max) throw new Error(target.name + " has already recovered " + sp.max + " Stress from this task, the most one character can. Pick someone else.");
         if (target.p.Stress < 1) throw new Error(target.name + " has no Stress to recover.");
       }
       var left = 0, fromBonus = 0, fromRoll = 0;
@@ -1962,7 +1974,8 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
         res.spentLog.push(what + " (" + sp.cost + ")");
         var jobs = [];
         if (target) {
-          res.stressFixed = (res.stressFixed || 0) + 1;
+          if (!res.stressBy) res.stressBy = {};
+          res.stressBy[target.id] = stressGiven(res, target.id) + 1;
           jobs.push(A.saveToken(target, { Stress: R.recoverStress(target.p.Stress, 1) }));
         }
         return Promise.all(jobs).then(function () {

@@ -230,9 +230,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   function dieCost(n) { return n; }
   // Total cost for buying `count` extra dice, given `free` bonus dice already in the pool.
   // Bonus dice from talents still count toward the 3 purchasable dice (p.255 "Talents").
-  function purchaseCost(count) {
-    var total = 0;
-    for (var i = 1; i <= count; i++) total += dieCost(i);
+  function purchaseCost(count, free) {
+    var total = 0, f = Math.max(0, Number(free) || 0);
+    for (var i = 1; i <= count; i++) total += dieCost(f + i);
     return total;
   }
   function maxPurchasable(baseDice, bonusDice) {
@@ -920,7 +920,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   A.NS = "net.wizardsgate.sta2e";
   A.CHAR_TYPE = "STA2e Character";
   A.SHIP_TYPE = "STA2e Ship";
-  A.VERSION = "1.8.1";
+  A.VERSION = "1.8.2";
 
   A.CHAR_PROPS = R.ATTRIBUTES.concat(R.DEPARTMENTS, ["Kind", "Species", "Rank", "Role", "Focuses", "Values", "Talents",
     "Stress", "StressBonus", "Determination", "Injuries", "Defeated", "FatiguedAttribute", "Protection", "Weapons", "Traits", "Notes",
@@ -1608,15 +1608,30 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     return S.r;
   };
 
+  // A ship rolls for itself only when it has an NPC crew. The players' ship assists a character's roll instead.
+  A.canRoll = function (t) { return !!t && !(t.isShip && !t.p.CrewQuality); };
   A.defaultRoller = function () {
     var imp = S.ctx.impersonated;
-    if (imp && S.tokens[imp]) return imp;
-    var sel = (S.ctx.selected || []).filter(function (m) { return S.tokens[m.id]; });
+    if (imp && A.canRoll(S.tokens[imp])) return imp;
+    var sel = (S.ctx.selected || []).filter(function (m) { return A.canRoll(S.tokens[m.id]); });
     if (sel.length) return sel[0].id;
     var mine = A.chars().filter(function (t) { return t.owner; });
     if (mine.length) return mine[0].id;
     var c = A.chars(); if (c.length) return c[0].id;
-    return S.order[0] || "";
+    return S.order.filter(function (id) { return A.canRoll(S.tokens[id]); })[0] || "";
+  };
+
+  // One result action at a time: a second press while the first is still saving does nothing.
+  // (A double-click on Done used to bank the roll's Momentum twice.)
+  var acting = false;
+  A.oneAtATime = function (fn) {
+    return function () {
+      if (acting) return Promise.resolve();
+      acting = true;
+      var p;
+      try { p = fn.apply(this, arguments); } catch (e) { acting = false; throw e; }
+      return Promise.resolve(p).then(function (v) { acting = false; return v; }, function (e) { acting = false; throw e; });
+    };
   };
 
   // Start a roll from the Actions tab
@@ -1773,12 +1788,15 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   }
   A.attackQualities = attackQualities;
 
+  // Cost of the bought die in slot i (0-2). A free bonus die uses the first slot, so the next die costs 2 (p.255).
+  function freeDice() { return S.lib.Settings && S.lib.Settings.freeDiceCheap ? 0 : num(S.r.bonusDice, 0); }
+  function dieCost(i) { return R.dieCost(freeDice() + i + 1); }
   function costs(t) {
     var r = S.r, npc = A.isNPC(t), action = actionById(r.actionId);
     var mom = 0, thrAdd = 0, thrSpend = 0, notes = [];
     r.buy.forEach(function (b, i) {
       if (!b) return;
-      var c = i + 1;
+      var c = dieCost(i);
       if (npc) thrSpend += c; else if (b === 1) mom += c; else thrAdd += c;
     });
     if (boughtCount()) notes.push("Buy " + boughtCount() + "d20");
@@ -1830,15 +1848,15 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     return res;
   }
 
-  A.doRoll = function () {
+  function doRoll() {
     var r = S.r, t = roller();
     if (!t) return A.toast("Pick a character first.");
     if (!t.isShip && (!r.attr || !r.dept)) return A.toast("Select an Attribute and a Department.");
     var tn = tnInfo(t), di = difficultyInfo(t), c = costs(t), sh = shipInfo();
     var action = actionById(r.actionId);
     if (r.mode === "assist" && !r.targets.filter(Boolean).length) return A.toast("Choose who you are assisting.");
-    if (!c.npc && c.momentum > S.lib.Momentum) return A.poolShort(A.doRoll, function () { return "Not enough Momentum in the pool (" + S.lib.Momentum + "). Pay with Threat instead."; });
-    if (c.npc && c.threatSpend > S.lib.Threat) return A.poolShort(A.doRoll, function () { return "Not enough Threat (" + S.lib.Threat + ")."; });
+    if (!c.npc && c.momentum > S.lib.Momentum) return A.poolShort(doRoll, function () { return "Not enough Momentum in the pool (" + S.lib.Momentum + "). Pay with Threat instead."; });
+    if (c.npc && c.threatSpend > S.lib.Threat) return A.poolShort(doRoll, function () { return "Not enough Threat (" + S.lib.Threat + ")."; });
     if (r.perfect && t.p.Determination < 1) return A.toast("No Determination left.");
     if (sh && sh.destroyed && r.mode === "task") return A.toast(sh.system + " is destroyed: tasks it would assist automatically fail.");
     if (action && action.needs && action.needs.indexOf("Reserve Power") >= 0) {
@@ -1894,7 +1912,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       return commitRoll(res, t, sh);
     }).then(function () { A.busy = false; A.render(); })
       .catch(function (e) { A.busy = false; A.render(); A.fail(e); });
-  };
+  }
+  A.doRoll = A.oneAtATime(doRoll);
 
   // Consume Determination / assists / reroute / one-time modifier, post to chat. (Costs were paid in doRoll.)
   function commitRoll(res, t, sh) {
@@ -1961,7 +1980,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   }
 
   /* ---------------- post-roll actions ---------------- */
-  A.rerollPicked = function (source) {
+  A.rerollPicked = A.oneAtATime(function (source) {
     var res = S.r.result, t = roller();
     var idx = Object.keys(res.pick).filter(function (k) { return res.pick[k]; }).map(Number);
     if (!idx.length) return A.toast("Click the dice you want to re-roll first.");
@@ -1981,19 +2000,22 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (res.mode === "opposed") jobs.push(A.saveLib({ Opposed: A.opposedEntry(res, t) }));
       return Promise.all(jobs);
     }).then(A.render).catch(A.fail);
-  };
+  });
 
-  A.buyOffComplication = function (i) {
+  function buyOffComplication(i) {
     var res = S.r.result;
-    if (res.npc && S.lib.Threat < R.COMPLICATION_BUYOFF) return A.poolShort(function () { return A.buyOffComplication(i); }, "Not enough Threat to buy off an NPC complication.");
+    if (res.comps[i] !== "open") return;
+    if (res.npc && S.lib.Threat < R.COMPLICATION_BUYOFF) return A.poolShort(function () { return buyOffComplication(i); }, "Not enough Threat to buy off an NPC complication.");
     return A.addPools(0, res.npc ? -R.COMPLICATION_BUYOFF : R.COMPLICATION_BUYOFF, true).then(function () {
       res.comps[i] = "bought";
       A.render();
     }).catch(A.fail);
-  };
+  }
+  A.buyOffComplication = A.oneAtATime(buyOffComplication);
 
   A.succeedAtCost = function () {
     var res = S.r.result;
+    if (res.sac || res.success) return;
     if (!(S.ctx.isGM || (res.action && res.action.sac) || (S.lib.Settings && S.lib.Settings.sacPlayers))) return A.toast("Succeed at Cost is the GM's call.");
     res.sac = true;
     evaluate(res);
@@ -2004,9 +2026,9 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   function momentumAvailable(res) { return res.bonusLeft + res.rollLeft + (res.npc ? S.lib.Threat : S.lib.Momentum); }
 
   // Spend Momentum: bonus first, then this roll, then the group pool (NPCs: Threat).
-  A.spend = function (label, cost, after) {
+  function spend(label, cost, after) {
     var res = S.r.result;
-    if (momentumAvailable(res) < cost) return A.poolShort(function () { return A.spend(label, cost, after); }, "Not enough Momentum for " + label + ".");
+    if (momentumAvailable(res) < cost) return A.poolShort(function () { return spend(label, cost, after); }, "Not enough Momentum for " + label + ".");
     var fromBonus = Math.min(res.bonusLeft, cost), fromRoll = Math.min(res.rollLeft, cost - fromBonus), left = cost - fromBonus - fromRoll;
     // Take any shortfall from the pool first; only record the spend once the pool has paid.
     var pay = left > 0 ? (res.npc ? A.addPools(0, -left, true) : A.addPools(-left, 0, true)) : Promise.resolve();
@@ -2016,16 +2038,22 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (after) after(res);
       A.render();
     }).catch(A.fail);
-  };
+  }
+  A.spend = A.oneAtATime(spend);
 
-  A.finishRoll = function () {
+  A.finishRoll = A.oneAtATime(function () {
     var res = S.r.result;
-    if (A.extendedMarkOnDone && res && res.extendedId && res.success && !res.sac && !res.xApplied) {
-      return A.extendedMarkOnDone(res).then(function () { if (res.xApplied) A.finishRoll(); }).catch(A.fail);
-    }
+    if (!res) return;
+    // On an extended task, Done marks the progress first if "Mark N spaces" wasn't pressed. If that save
+    // fails the result stays open (the error has been shown); if the task was removed, the roll still finishes.
+    var marked = A.extendedMarkOnDone && res.mode === "task" && res.extendedId && res.success && !res.xApplied ?
+      A.extendedMarkOnDone(res).then(function (ok) { return ok; }, function () { return false; }) : Promise.resolve(true);
+    return marked.then(function (ok) { return ok ? bankAndClose(res) : null; });
+  });
+  function bankAndClose(res) {
     var leftover = res.rollLeft;
     var bank = leftover > 0 ? (res.npc ? A.addPools(0, leftover) : A.addPools(leftover, 0)) : Promise.resolve(null);
-    bank.then(function (pool) {
+    return bank.then(function (pool) {
       var rows = [];
       if (res.spentLog.length) rows.push("Spent: " + A.esc(res.spentLog.join(", ")));
       if (leftover > 0) {
@@ -2042,19 +2070,20 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (accepted) rows.push(accepted + " complication" + (accepted > 1 ? "s" : "") + " for the GM to apply.");
       return rows.length ? A.chat(A.card(res.name + ": outcome", res.action ? res.action.name : "", rows, "#56d0e0")) : null;
     }).then(function () { A.newRoll(res.tokenId); A.render(); }).catch(A.fail);
-  };
+  }
 
-  A.giveReactiveMomentum = function () {
+  A.giveReactiveMomentum = A.oneAtATime(function () {
     var res = S.r.result, opp = res.opposed;
+    if (res.reactiveGiven) return;
     var m = R.opposedReactiveMomentum(res.difficulty, res.ev.successes);
     var from = A.tok(opp.fromId);
-    res.reactiveGiven = true;
     var p = (from && A.isNPC(from)) ? A.addPools(0, m) : A.addPools(m, 0);
-    p.then(function () {
-      A.chat(A.card(opp.fromName + " wins the opposed task", "", [opp.fromName + " gains " + m + " Momentum" + (from && A.isNPC(from) ? " (added to Threat)" : "") + "."], "#ff9b9b"));
+    return p.then(function () {
+      res.reactiveGiven = true;
+      A.chat(A.card(opp.fromName + " wins the opposed task", "", [A.esc(opp.fromName) + " gains " + m + " Momentum" + (from && A.isNPC(from) ? " (added to Threat)" : "") + "."], "#ff9b9b"));
       A.render();
     }).catch(A.fail);
-  };
+  });
 
   /* ---------------- opposed tasks (p.256) ----------------
    * The reactive side's successes set the Difficulty. When it names who it's against, only that roller picks it up.
@@ -2222,7 +2251,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         var sys2 = R.systemFromD20(v[1 + di]);
         var half = Math.ceil(dmg / 2);
         var tmp = Object.assign({}, target.p, { Shields: shields });
-        var out2 = R.applyShipDamage(tmp, { damage: half, piercing: piercing, highYield: R.hasQuality(q, "High Yield"), extraResistance: extraRes, system: sys2 });
+        var out2 = R.applyShipDamage(tmp, { damage: half, piercing: piercing, depleting: R.hasQuality(q, "Depleting"), highYield: R.hasQuality(q, "High Yield"), extraResistance: extraRes, system: sys2 });
         shields = out2.shieldsAfter;
         breaches = R.addBreaches(breaches, sys2, out2.breaches);
         rows.push("Devastating Attack" + (nDev > 1 ? " " + (di + 1) : "") + ": " + sys2 + " takes " + out2.final + " (shields &rarr; " + shields + ")" + (out2.breaches ? ", <b>" + out2.breaches + " breach(es)</b>" : ""));
@@ -2293,13 +2322,22 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       var mine = R.collisionDamage(ship.p.Scale, res.atk.zones), theirs = R.collisionDamage(tg.p.Scale, res.atk.zones);
       var o1 = R.applyShipDamage(tg.p, { damage: mine + res.extra.damage, piercing: true });
       var o2 = R.applyShipDamage(ship.p, { damage: theirs, piercing: true });
-      jobs.push(A.saveToken(tg, { Shields: o1.shieldsAfter, Breaches: R.addBreaches(tg.p.Breaches, "Structure", o1.breaches) }));
-      jobs.push(A.saveToken(ship, { Shields: o2.shieldsAfter, Breaches: R.addBreaches(ship.p.Breaches, "Structure", o2.breaches) }));
+      var c1 = { Shields: o1.shieldsAfter, Breaches: R.addBreaches(tg.p.Breaches, "Structure", o1.breaches) };
+      var c2 = { Shields: o2.shieldsAfter, Breaches: R.addBreaches(ship.p.Breaches, "Structure", o2.breaches) };
+      var moreRows = [];
+      // A collision shakes a ship like any other damage (p.308-309).
+      [[tg, o1, c1], [ship, o2, c2]].forEach(function (x) {
+        if (!x[1].shakenCount) return;
+        var shk = A.addShaken(x[0], x[0].p.Effects || [], x[1].shakenCount);
+        x[2].Effects = shk.effects; moreRows.push(shk.row);
+      });
+      jobs.push(A.saveToken(tg, c1));
+      jobs.push(A.saveToken(ship, c2));
       msg = "Ram! " + tg.name + " takes " + o1.final + " (" + o1.breaches + " breach) and " + ship.name + " takes " + o2.final + " (" + o2.breaches + " breach). Devastating; breaches applied to Structure, reassign if the GM prefers.";
     }
     return Promise.all(jobs).then(function () {
       res.applied = true;
-      if (msg) return A.chat(A.card(res.name + ": " + a.name, "", [A.esc(msg)], "#4cc38a"));
+      if (msg) return A.chat(A.card(res.name + ": " + a.name, "", [A.esc(msg)].concat(moreRows || []), "#4cc38a"));
     });
     });
     });
@@ -2326,7 +2364,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     var out = [];
 
     // who + mode
-    var rollers = S.order.map(A.tok).filter(function (x) { return x && (x.isSTA); });
+    if (t && !A.canRoll(t)) { r.tokenId = A.defaultRoller(); t = roller(); }
+    var rollers = S.order.map(A.tok).filter(function (x) { return x && x.isSTA && A.canRoll(x); });
     out.push(h("div", { class: "card" },
       h("div", { class: "row" },
         t ? A.portrait(t) : null,
@@ -2594,7 +2633,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       (function (i) {
         var locked = i >= mb || (i > 0 && !r.buy[i - 1]);
         var st = r.buy[i];
-        var label = st === 1 ? (i + 1) + " Momentum" : st === 2 ? (npc ? "spend " : "+") + (i + 1) + " Threat" : "Buy die #" + (i + 1);
+        var label = st === 1 ? dieCost(i) + " Momentum" : st === 2 ? (npc ? "spend " : "+") + dieCost(i) + " Threat" : "Buy die #" + (i + 1) + " (" + dieCost(i) + ")";
         slots.appendChild(h("div", { class: "buyslot" + (st === 1 ? " mom" : st === 2 ? " thr" : "") + (locked && !st ? " locked" : ""), onclick: function () {
           if (locked && !st) return;
           var next = npc ? (st ? 0 : 2) : (st + 1) % 3;
@@ -2734,21 +2773,30 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     b("Keep the Initiative", 2);
     b("Swift Action", 2);
     b("Extra Minor Action", 1);
-    // p.278: at most 3 Stress recovered per task, however many times it's bought and applied.
-    var stressBought = num(res.extra.stressBought, 0);
-    b("Recover 1 Stress", 2, function (r) { r.extra.stressFix += 1; r.extra.stressBought = num(r.extra.stressBought, 0) + 1; }, stressBought >= 3);
+    // p.278: at most 3 Stress recovered per character from one task. Up to 3 can be bought and waiting to be
+    // given out at a time; what one character can't take stays to give to another.
+    var by = res.extra.stressBy || (res.extra.stressBy = {});
+    function stressRoom(x) { return Math.min(3 - num(by[x.id], 0), x.p.Stress); }
+    b("Recover 1 Stress", 2, function (r) { r.extra.stressFix += 1; r.extra.stressBought = num(r.extra.stressBought, 0) + 1; }, res.extra.stressFix >= 3);
     card.appendChild(btns);
-    if (stressBought) card.appendChild(h("div", { class: "small muted" }, "Recover Stress: " + stressBought + " of 3 for this task."));
+    var given = Object.keys(by).filter(function (id) { return by[id] > 0 && A.tok(id); }).map(function (id) { return A.tok(id).name + " " + by[id] + " of 3"; });
+    if (given.length || res.extra.stressFix) card.appendChild(h("div", { class: "small muted" },
+      "Recover Stress: at most 3 per character from this task." + (given.length ? " So far: " + given.join(", ") + "." : "")));
     if (res.extra.stressFix) {
-      var chars = A.chars().filter(function (x) { return x.p.Stress > 0; });
+      var chars = A.chars().filter(function (x) { return stressRoom(x) > 0; });
       card.appendChild(h("div", { class: "row", style: "margin-top:6px" }, "Remove " + res.extra.stressFix + " Stress from",
-        A.select("", A.tokenOptions(chars, true), function (v) {
+        A.select("", A.tokenOptions(chars, true), A.oneAtATime(function (v) {
           var x = A.tok(v); if (!x) return;
-          var n = res.extra.stressFix; res.extra.stressFix = 0;
-          A.refreshTokens([x]).then(function () { return A.saveToken(x, { Stress: R.recoverStress(x.p.Stress, n) }); }).then(function () {
-            return A.chat(A.card(x.name + " recovers " + n + " Stress", "Momentum spend", [], "#56d0e0"));
+          return A.refreshTokens([x]).then(function () {
+            var n = Math.min(res.extra.stressFix, stressRoom(x));
+            if (n <= 0) { A.toast(x.name + " can't recover any more Stress from this task."); return null; }
+            return A.saveToken(x, { Stress: R.recoverStress(x.p.Stress, n) }).then(function () {
+              res.extra.stressFix -= n; by[x.id] = num(by[x.id], 0) + n;
+              return A.chat(A.card(x.name + " recovers " + n + " Stress", "Momentum spend", [], "#56d0e0"));
+            });
           }).then(A.render).catch(A.fail);
-        })));
+        }))));
+      if (!chars.length) card.appendChild(h("div", { class: "small muted" }, "No one has Stress left to recover from this task."));
     }
     if (res.spentLog.length) card.appendChild(h("div", { class: "small muted", style: "margin-top:6px" }, "Spent: " + res.spentLog.join(", ")));
     return card;
@@ -2841,11 +2889,15 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
   }
 
   // Done marks the progress if the player hasn't pressed "Mark N spaces" already.
+  // Resolves true when the roll can be finished: progress marked, nothing to mark, or the task is gone.
+  // An extended task can progress after Succeed at Cost as well (p.259).
   A.extendedMarkOnDone = function (res) {
-    if (!res || res.mode !== "task" || !res.success || res.sac || !res.extendedId || res.xApplied) return Promise.resolve();
-    var x = find(res.extendedId);
-    if (!x) return Promise.resolve();
-    return applyProgress(res, x, impactFor(res, x).impact);
+    if (!res || res.mode !== "task" || !res.success || !res.extendedId || res.xApplied) return Promise.resolve(true);
+    return A.refreshPools().catch(A.fail).then(function () {
+      var x = find(res.extendedId);
+      if (!x) { A.toast("That extended task was removed, so no progress was marked."); return true; }
+      return applyProgress(res, x, impactFor(res, x).impact).then(function () { return !!res.xApplied; });
+    });
   };
 
   A.extendedApplyCard = function (res) {
@@ -2878,7 +2930,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         var x = find(x0.id);
         if (!x) throw new Error("That extended task no longer exists. Press \u27f3 to reload.");
         var adv = R.advanceTrack(x.track, x.progress, impact);
-        var rows = [res.name + " marks <b>" + adv.marked + "</b> space" + (adv.marked === 1 ? "" : "s") + ": " + adv.progress + " / " + x.track];
+        var rows = [A.esc(res.name) + " marks <b>" + adv.marked + "</b> space" + (adv.marked === 1 ? "" : "s") + ": " + adv.progress + " / " + x.track];
         if (x.breakthroughs) adv.crossed.forEach(function (n) {
           rows.push("<b>Breakthrough " + n + "!</b> " + A.esc((x.notes || [])[n - 1] || "The situation changes (GM describes)."));
         });
@@ -3955,11 +4007,16 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     return Promise.all([A.refreshTokens([t]), av.threat ? A.refreshPools() : null]).then(function () {
       var p = t.p;
       if (!(p.Injuries || []).some(function (i) { return i.id === inj.id; })) { A.toast(t.name + " no longer has that Injury."); return clearHits(inj.id).then(function () { return false; }); }
+      var cur = p.Injuries.filter(function (i) { return i.id === inj.id; })[0];
       var list = p.Injuries.filter(function (i) { return i.id !== inj.id; });
       var ch = { Injuries: list };
-      // Avoiding an Injury also prevents being Defeated by it (p.292): go back to how things were before it.
-      if (!list.length) ch.Defeated = 0;
-      else if (inj.prevDefeated !== undefined) ch.Defeated = inj.prevDefeated ? 1 : 0;
+      // Avoiding an Injury also prevents being Defeated by it (p.292). A hit still waiting for this choice never
+      // Defeated them, so Defeated stays as it is (they may have accepted another hit meanwhile). An Injury
+      // already accepted goes back to how things were before it.
+      if (!cur.pending) {
+        if (!list.length) ch.Defeated = 0;
+        else if (cur.prevDefeated !== undefined) ch.Defeated = cur.prevDefeated ? 1 : 0;
+      }
       var jobs = [], msg;
       if (av.threat) {
         if (p.Kind === "Notable NPC" && S.lib.NpcAvoidUsed[t.id]) { A.toast("This Notable NPC already avoided an injury this scene."); return false; }
@@ -3990,6 +4047,14 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
         .then(function () { return A.chat(A.card(t.name + " takes the Injury", found.name, [A.esc(t.name + " accepts a " + (found.kind === "deadly" ? "Deadly" : "Stun") + " Injury, severity " + found.severity + ", and is Defeated.")], "#b3261e")); });
     }).then(A.render, function (e) { A.render(); try { A.fail(e); } catch (x) { /* shown */ } });
   }
+
+  // Tokens with a hit waiting that this client can answer. The poll re-reads them even when they aren't on
+  // screen, or the Injury wouldn't be known here and the choice would never show.
+  A.hitTokens = function () {
+    var hits = S.lib.Hits || {}, seen = {};
+    return Object.keys(hits).map(function (k) { return hits[k] && A.tok(hits[k].tokenId); })
+      .filter(function (t) { if (!t || seen[t.id] || !A.canEdit(t)) return false; seen[t.id] = 1; return true; });
+  };
 
   // A card at the top of the window for each hit waiting on a character this client controls.
   A.hitPrompts = function () {
@@ -4218,12 +4283,12 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: st.highYield, onchange: function (e) { st.highYield = e.target.checked; } }), "High Yield"),
       h("label", { class: "row tight" }, h("input", { type: "checkbox", checked: !!st.dampening, onchange: function (e) { st.dampening = e.target.checked; } }), "Dampening"),
       A.select(st.system, [{ value: "", label: "Random system" }].concat(R.SYSTEMS), function (v) { st.system = v; }),
-      h("button", { class: "btn primary small", onclick: function () { incoming(s, st); } }, "Apply")));
+      h("button", { class: "btn primary small", onclick: A.oneAtATime(function () { return incoming(s, st); }) }, "Apply")));
     return card;
   }
 
   function incoming(s, st) {
-    A.refreshTokens([s]).then(function () { return A.rollDice(1); }).then(function (v) {
+    return A.refreshTokens([s]).then(function () { return A.rollDice(1); }).then(function (v) {
       var sys = st.system || R.systemFromD20(v[0]);
       var out = R.applyShipDamage(s.p, { damage: st.damage, piercing: st.piercing, depleting: st.depleting, highYield: st.highYield,
         extraResistance: A.hasEffect(s, "modulate") ? 2 : 0, system: sys });
@@ -4319,6 +4384,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
     out.push(h("div", { class: "card" }, h("h3", null, "Settings"),
       toggle("assistBuyDice", "House rule: assistants may buy extra dice with Momentum/Threat (rules as written: 1d20 only)"),
       toggle("npcRollsGmOnly", "Show NPC rolls to the GM only"),
+      toggle("freeDiceCheap", "House rule: a free bonus die doesn't raise the cost of bought dice (rules as written, p.255: it uses the first slot, so the next die costs 2)"),
       toggle("sacPlayers", "Players may choose Succeed at Cost on any failed task (p.259; Warp and Regain Power always allow it)"),
       h("div", { class: "row", style: "margin-top:6px" }, h("span", null, "Active ship:"),
         A.select((A.activeShip() || {}).id || "", A.tokenOptions(A.ships(), true), function (v) {
@@ -4446,10 +4512,17 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
       if (A.busy || typing()) return;
       var open = !!(S.r && S.r.result);
       var shown = open ? [] : A.shownTokens();
-      // Any shared data counts (pools, settings, banked assists, opposed rolls, extended tasks), plus the tokens on screen.
-      var snap = function () { return JSON.stringify(S.lib) + JSON.stringify(shown.map(function (t) { return t.raw; })); };
+      // Any shared data counts (pools, settings, banked assists, opposed rolls, extended tasks, waiting hits),
+      // plus the tokens on screen and the tokens with a hit waiting for this client's answer.
+      var snap = function () {
+        return JSON.stringify(S.lib) + JSON.stringify(shown.concat(A.hitTokens()).map(function (t) { return t.id + JSON.stringify(t.raw); }));
+      };
       var before = snap();
-      Promise.all([A.refreshPools(), shown.length ? A.refreshTokens(shown).catch(function () {}) : null]).then(function () {
+      A.refreshPools().then(function () {
+        // Separate requests, so a token that has gone missing from one list doesn't stop the other refreshing.
+        return Promise.all([shown.length ? A.refreshTokens(shown).catch(function () {}) : null,
+          A.refreshTokens(A.hitTokens()).catch(function () {})]);
+      }).then(function () {
         if (A.busy || typing() || !!(S.r && S.r.result) !== open) return;
         if (snap() !== before) A.render();
       }).catch(function () {});
