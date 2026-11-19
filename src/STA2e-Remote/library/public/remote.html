@@ -1373,6 +1373,9 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     blank1: { name: "Blank token", type: "Basic", map: "Bridge", owner: 1, props: {} }
   };
   var ctxOverride = { isGM: true };
+  // As the api macros: players don't see tokens on the GM layer or hidden from players, unless they own them.
+  // Mock tokens may set layer: "GM" or hidden: true.
+  function playerSees(t) { return ctxOverride.isGM || t.owner === 1 || (t.layer !== "GM" && !t.hidden); }
   var SHARED_PROPS = ["Stress", "Injuries", "Defeated", "Shields", "Breaches", "Effects", "ReservePower", "ReroutedSystem", "RegainAttempts",
     "StressText", "StressPct", "DeterminationText", "Status", "InjuryList", "FocusList", "ShieldsText", "ShieldsPct", "Resistance", "PowerStatus", "BreachList", "EffectList"];
   var PLAYER_LIB_KEYS = ["Opposed", "DiffOneTime"];   // as api/libSet.mts
@@ -1381,7 +1384,7 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     var out;
     switch (name) {
       case "ctx": {
-        var list = Object.keys(tokens).filter(function (id) { return /^STA2e/.test(tokens[id].type); }).map(function (id) {
+        var list = Object.keys(tokens).filter(function (id) { return /^STA2e/.test(tokens[id].type) && playerSees(tokens[id]); }).map(function (id) {
           var t = tokens[id]; return { id: id, map: t.map, name: t.name, type: t.type, owner: t.owner, img: "" };
         });
         var sel = root.MockSelected || ["pc1"];
@@ -1393,7 +1396,7 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       case "tokenGet":
         out = {};
         (args.tokens || []).forEach(function (m) {
-          var t = tokens[m.id]; if (!t || (m.map && t.map !== m.map)) return;   // as api/tokenGet.mts: missing tokens are left out
+          var t = tokens[m.id]; if (!t || (m.map && t.map !== m.map) || !playerSees(t)) return;   // as api/tokenGet.mts: missing and hidden tokens are left out
           var p = {}; (args.props || []).forEach(function (k) { p[k] = t.props[k] === undefined ? "" : t.props[k]; });
           if (!ctxOverride.isGM && t.owner !== 1) p.Notes = "";   // as api/tokenGet.mts
           out[m.id] = { name: t.name, type: t.type, map: t.map, props: p };
@@ -1402,7 +1405,7 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       case "tokenSet": {
         // Same rule as api/tokenSet.mts: GM and owners write anything; other players only conflict state.
         var t = tokens[args.id];
-        if (!t || (args.map && t.map !== args.map)) { out = { ok: 0, error: "noToken", count: 0, refused: [] }; break; }
+        if (!t || (args.map && t.map !== args.map) || !playerSees(t)) { out = { ok: 0, error: "noToken", count: 0, refused: [] }; break; }
         var full = ctxOverride.isGM || t.owner === 1, refused = [], written = 0;
         if (args.type) { if (full) t.type = args.type; else refused.push("type"); }
         if (args.name) { if (full) t.name = args.name; else refused.push("name"); }
@@ -1419,7 +1422,8 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       }
       case "tokenMove": {
         var mt = tokens[args.id];
-        out = mt && mt.map === "Bridge" ? { ok: 1 } : { ok: 0, error: "wrongMap", map: mt ? mt.map : "" };
+        out = !mt || mt.map !== "Bridge" ? { ok: 0, error: "wrongMap", map: mt ? mt.map : "" } :
+          (ctxOverride.isGM || mt.owner === 1) ? { ok: 1 } : { ok: 0, error: "notAllowed" };   // as api/tokenMove.mts
         if (mt && out.ok) mt.movedToView = true;
         break;
       }
@@ -1624,7 +1628,9 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     badKey: "The server rejected this campaign's key. Use “Forget server” and set it up again.",
     unknownCampaign: "The server doesn't know this campaign any more. Use “Forget server” and set it up again.",
     badCreateKey: "Wrong setup key. It's the STA_CREATE_KEY value in the server's config.php.",
-    storage: "The server can't write its data folder. Check the folder permissions on the server."
+    storage: "The server can't write its data folder. Check the folder permissions on the server.",
+    unknownAction: "This server's relay is older than the add-on and can't do that yet. Update api.php on the server (the STA2e-Relay folder in the add-on's repository).",
+    unknownConnection: "The server doesn't know that connection any more. Press \u27f3, or remove it and create it again."
   };
   function relay(body) {
     return A.rapi("sync", { url: X.cfg.server || X.setup.server, body: JSON.stringify(body) }).then(function (res) {
@@ -2065,11 +2071,12 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
     inFlight = true;
     var needSnap = Date.now() - X.lastSnapAt > SNAPSHOT_EVERY_MS;
     var prep = needSnap ? A.loadAll().then(function () { X.lastSnapAt = Date.now(); return closeStaleRolls(); }) : Promise.resolve();
-    var results = [], snaps = null;
+    var results = [], snaps = null, usedKey = X.cfg.gmKey;
     prep.then(function () {
       results = X.results.splice(0, X.results.length);
       snaps = changedSnapshots(false);
-      return relay({ action: "gm.sync", campaign: X.cfg.campaign, gmKey: X.cfg.gmKey, results: results, snapshots: snaps || {} });
+      usedKey = X.cfg.gmKey;
+      return relay({ action: "gm.sync", campaign: X.cfg.campaign, gmKey: usedKey, results: results, snapshots: snaps || {} });
     }).then(function (res) {
       X.conns = res.connections || [];
       X.serverNow = res.now || 0;
@@ -2091,7 +2098,17 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       inFlight = false;
       X.status = "error"; X.statusText = String(e && e.message || e);
       render();
-      if (e && (e.code === "badKey" || e.code === "unknownCampaign" || e.code === "externalAccessOff" || e.code === "gmOnly")) {
+      if (e && e.code === "badKey") {
+        // The key may have just been replaced, here or in another GM's window. Use the campaign's current key
+        // if it differs; only a key that is still the campaign's and still refused turns the link off.
+        if (usedKey !== X.cfg.gmKey) { schedule(10); return; }
+        loadConfig().then(function () {
+          if (X.cfg.gmKey !== usedKey) { X.status = "busy"; X.statusText = ""; render(); schedule(10); return; }
+          X.cfg.linkOn = false; saveConfig().catch(function () {}); render();
+        }).catch(function () { schedule(POLL_MS * 3); });
+        return;
+      }
+      if (e && (e.code === "unknownCampaign" || e.code === "externalAccessOff" || e.code === "gmOnly")) {
         X.cfg.linkOn = false; saveConfig().catch(function () {});
         return;
       }
@@ -2200,6 +2217,30 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       return saveAssign();
     }).then(function () { logLine("New connection: " + name); render(); }).catch(function (e) { A.toast(String(e.message || e)); });
   }
+  // The GM key and the players' links live in the campaign's add-on data, which MapTool sends to every client,
+  // so a player could read them from chat. These replace them on the server; the old ones stop working at once.
+  function newGmKey() {
+    X.keyBusy = true; render();
+    relay({ action: "gm.rotateKey", campaign: X.cfg.campaign, gmKey: X.cfg.gmKey }).then(function (res) {
+      if (!res.gmKey) throw new Error("The server didn't send a new key.");
+      X.cfg.gmKey = res.gmKey;
+      return saveConfig();
+    }).then(function () {
+      X.keyBusy = false; logLine("New GM key issued");
+      A.toast("New GM key issued. The old one no longer works.", true); render();
+    }).catch(function (e) { X.keyBusy = false; render(); A.toast(String(e.message || e)); });
+  }
+  function newLink(c) {
+    relay({ action: "gm.newLink", campaign: X.cfg.campaign, gmKey: X.cfg.gmKey, id: c.id }).then(function (res) {
+      var a = X.assign[c.id] || (X.assign[c.id] = { tokens: [], join: "" });
+      a.join = res.join;
+      X.lastJoin = { id: c.id, join: res.join, renewed: true };
+      return saveAssign();
+    }).then(function () {
+      logLine("New link for " + c.name);
+      A.toast("New link for " + c.name + ". Send it to them: the old link no longer works.", true); render();
+    }).catch(function (e) { A.toast(String(e.message || e)); });
+  }
   function removeConnection(c) {
     relay({ action: "gm.disconnect", campaign: X.cfg.campaign, gmKey: X.cfg.gmKey, id: c.id }).then(function () {
       delete X.assign[c.id];
@@ -2270,6 +2311,11 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       " and pick their connection: with its PIN, or by asking you to approve them."));
     card.appendChild(h("div", { class: "muted small" }, X.cfg.server));
     card.appendChild(h("div", { class: "muted small" }, "Keep this window open during the session: players' commands run while it's open and the link is on."));
+    card.appendChild(h("div", { class: "row" },
+      h("span", { class: "muted small", style: "flex:1" }, "This campaign keeps the server's GM key and the players' links where any player's MapTool can read them. If you think one was read, issue a new one: the old one stops working."),
+      h("button", { class: "btn small", disabled: X.keyBusy ? true : null, onclick: function () {
+        if (X.confirmKey) { X.confirmKey = false; newGmKey(); } else { X.confirmKey = true; render(); }
+      } }, X.keyBusy ? "Working\u2026" : X.confirmKey ? "Really issue a new GM key?" : "New GM key")));
     card.appendChild(h("div", { class: "row" }, h("span", { class: "spacer" }),
       h("button", { class: "btn small warn", onclick: function () {
         if (X.confirmForget) { X.confirmForget = false; forgetServer(); } else { X.confirmForget = true; render(); }
@@ -2313,6 +2359,12 @@ input.join { font-family: monospace; font-size: 11px; color: var(--cyan); }
       inp.addEventListener("focus", function () { inp.select(); });
       card.appendChild(h("label", { class: "field wide" }, "Player's link (keep it private: it lets them act as these characters)", inp));
     }
+    card.appendChild(h("div", { class: "row" },
+      X.lastJoin && X.lastJoin.renewed && X.lastJoin.id === c.id ? h("span", { class: "muted small" }, "New link above. Send it to " + c.name + ".") : null,
+      h("span", { class: "spacer" }),
+      h("button", { class: "btn small", onclick: function () {
+        if (X.confirmLink === c.id) { X.confirmLink = null; newLink(c); } else { X.confirmLink = c.id; render(); }
+      } }, X.confirmLink === c.id ? "Really? Their old link stops working" : "New link")));
     return card;
   }
 

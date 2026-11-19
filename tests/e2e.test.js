@@ -4,6 +4,8 @@
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
+const { spawn, spawnSync } = require("child_process");
 const ROOT = path.resolve(__dirname, "..");
 const appPath = path.join(ROOT, "src/STA2e/library/public/app.html");
 const remotePath = path.join(ROOT, "src/STA2e-Remote/library/public/remote.html");
@@ -22,6 +24,7 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     const until = async (f, ms = 3000) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) return false; await new Promise(r => setTimeout(r, 20)); } return true; };
     const lastChat = () => (M.log[M.log.length - 1] || {}).html || "";
     const btn = (re) => [...document.querySelectorAll("button")].find(b => re.test(b.textContent));
+    const toastsNow = () => [...document.querySelectorAll(".toast")].map(t => t.textContent);
 
     // ---- 1. Pools: pay before rolling, bank as a delta ----
     M.lib.Momentum = 2; M.lib.Threat = 6; await A.refreshPools();
@@ -332,8 +335,10 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     S.r.result = null;
     A.newRoll("pc1"); Object.assign(S.r, { attr: "Control", dept: "Engineering", baseDiff: 1 }); A.render();
     ok(/is waiting for Jem'Hadar Soldier/.test(document.body.textContent) && !/Opposed: Dr\. Yilil/.test(document.body.textContent), "another roller doesn't pick it up");
+    M.ctx.isGM = true; await A.reload();   // the GM rolls for the NPC
     A.newRoll("npc1"); Object.assign(S.r, { attr: "Control", dept: "Security" }); A.render();
     ok(/Opposed: Dr\. Yilil set Difficulty/.test(document.body.textContent), "the named attacker picks it up");
+    M.ctx.isGM = false; await A.reload();
 
     M.ctx.isGM = true;
     M.lib.Extended = { list: [
@@ -621,8 +626,68 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     const rollAs = [...document.querySelectorAll("select")][0];
     ok(![...rollAs.options].some(o => o.value === "ship1") && S.r.tokenId !== "ship1" && ![...document.querySelectorAll(".card h3")].some(x => /NPC ship crew/.test(x.textContent)),
       "the players' ship isn't a choice under Rolling as (now " + S.r.tokenId + ")");
-    ok([...rollAs.options].some(o => o.value === "ship2"), "an NPC-crewed ship still is");
+    await fresh(true);
+    const rollAsGm = [...document.querySelectorAll("select")][0];
+    ok([...rollAsGm.options].some(o => o.value === "ship2") && ![...rollAsGm.options].some(o => o.value === "ship1"), "the GM's list has the NPC-crewed ship, not the players' ship");
     await fresh(true); M.tokens.pc2.props.Determination = 1; await A.reload(); S.tab = "roll";
+
+    // ---- 15. 1.8.3: what players can see, roll as and move ----
+    const optVals = (sel) => sel ? [...sel.options].map(o => o.value).filter(Boolean) : [];
+    M.tokens.npc1.layer = "GM";
+    await fresh(false);
+    ok(!S.order.includes("npc1") && S.order.includes("pc1"), "player: a token on the GM layer isn't in their window (" + S.order.join(",") + ")");
+    const hiddenGet = await A.api("tokenGet", { tokens: [{ id: "npc1", map: "Bridge" }], props: ["Stress"] });
+    ok(!hiddenGet.npc1, "player: tokenGet leaves out a GM-layer token");
+    const hiddenSet = await A.api("tokenSet", { id: "npc1", map: "Bridge", props: { Stress: 3 } });
+    ok(hiddenSet.error === "noToken" && Number(M.tokens.npc1.props.Stress) === 0, "player: tokenSet refuses a GM-layer token");
+    M.tokens.pc2.layer = "GM"; await A.reload();
+    ok(S.order.includes("pc2"), "player: a hidden token they own is still theirs");
+    delete M.tokens.pc2.layer; delete M.tokens.npc1.layer;
+    M.tokens.npc1.hidden = true; await A.reload();
+    ok(!S.order.includes("npc1"), "player: a token hidden from players isn't in their window");
+    delete M.tokens.npc1.hidden;
+    await fresh(true);
+    M.tokens.npc1.layer = "GM"; await A.reload();
+    ok(S.order.includes("npc1"), "GM: sees the GM-layer token");
+    delete M.tokens.npc1.layer;
+
+    await fresh(false);
+    const rollers15 = optVals([...document.querySelectorAll("select")][0]);
+    ok(rollers15.length && rollers15.every(id => M.tokens[id].owner === 1) && !rollers15.includes("npc1") && !rollers15.includes("ship2"),
+      "player: Rolling as lists only their own tokens (" + rollers15.join(",") + ")");
+    S.tab = "character"; A.render();
+    const chars15 = optVals([...document.querySelectorAll("select")].find(x => [...x.options].some(o => o.value === "pc1")));
+    ok(!chars15.includes("npc1") && chars15.includes("pc2"), "player: Character tab lists player characters, not the NPC (" + chars15.join(",") + ")");
+    S.charId = "npc1"; A.render();
+    ok(S.charId !== "npc1" && !/Jem'Hadar/.test((document.querySelector(".card select") || {}).value || ""), "player: the NPC's sheet can't be opened by setting it");
+    S.tab = "ship"; S.shipId = "ship2"; A.render();
+    const ships15 = optVals([...document.querySelectorAll("select")].find(x => [...x.options].some(o => o.value === "ship1")));
+    ok(ships15.includes("ship1") && !ships15.includes("ship2") && S.shipId !== "ship2", "player: Ship tab has the players' ship, not the NPC ship (" + ships15.join(",") + ")");
+    M.lib.Settings = { playersSeeNpcSheets: true }; await A.reload();
+    S.tab = "character"; A.render();
+    const chars15b = optVals([...document.querySelectorAll("select")].find(x => [...x.options].some(o => o.value === "pc1")));
+    ok(chars15b.includes("npc1"), "with the GM setting on, players can open NPC sheets");
+    S.tab = "roll"; A.newRoll("pc1"); A.render();
+    ok(!optVals([...document.querySelectorAll("select")][0]).includes("npc1"), "...but still can't roll as NPCs");
+    M.lib.Settings = {};
+
+    // Move to view: only the GM or the owner.
+    await fresh(false);
+    const mvNpc = await A.api("tokenMove", { id: "npc1", map: "Bridge" });
+    ok(mvNpc.ok === 0 && mvNpc.error === "notAllowed" && !M.tokens.npc1.movedToView, "player: tokenMove refuses a token they don't own");
+    await A.moveToView(A.tok("npc1"));
+    ok(toastsNow().some(t => /Only the GM or Jem'Hadar Soldier's owner can move it/.test(t)), "player: the window says why");
+    const mvOwn = await A.api("tokenMove", { id: "pc1", map: "Bridge" });
+    ok(mvOwn.ok === 1, "player: moving their own token works");
+    delete M.tokens.pc1.movedToView;
+
+    // A player who owns nothing gets told how to get a character.
+    const owners15 = Object.keys(M.tokens).map(id => [id, M.tokens[id].owner]);
+    Object.keys(M.tokens).forEach(id => { M.tokens[id].owner = 0; });
+    await fresh(false);
+    ok(!S.r.tokenId && /You don't own a character yet/.test(document.body.textContent), "player with no tokens: told to ask the GM, not shown someone else's");
+    owners15.forEach(([id, o]) => { M.tokens[id].owner = o; });
+    await fresh(true);
     return out;
   }, VERSION);
   results.forEach(l => console.log(l));
@@ -630,7 +695,8 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
   // Remote window: player rolls pay and bank through poolAdd
   const p2 = await browser.newPage();
   p2.on("pageerror", e => errors.push("remote pageerror: " + e.message));
-  p2.on("console", m => { if (m.type() === "error") errors.push("remote console: " + m.text()); });
+  let relayPhase = false;   // the relay checks provoke 403s on purpose (an old key, an old link)
+  p2.on("console", m => { if (m.type() === "error" && !(relayPhase && /status of 403/.test(m.text()))) errors.push("remote console: " + m.text()); });
   await p2.goto("file://" + path.resolve(remotePath));
   await p2.waitForFunction(() => window.App && App.X && !App.S.loading && App.S.order.length > 0);
   const r2 = await p2.evaluate(async () => {
@@ -686,9 +752,79 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "src/STA2e/library.js
     return out;
   });
   r2.forEach(l => console.log(l));
+
+  // Remote window against a real copy of the relay (src/STA2e-Relay) run by PHP's built-in server.
+  let r3 = [];
+  const hasPhp = spawnSync("php", ["-v"]).status === 0;
+  if (!hasPhp) console.log("SKIP relay tests: php isn't installed");
+  else {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sta-relay-"));
+    fs.cpSync(path.join(ROOT, "src/STA2e-Relay"), dir, { recursive: true });
+    // The test page is a file:// page, whose origin is "null".
+    fs.writeFileSync(path.join(dir, "config.php"), "<?php\nconst STA_CREATE_KEY = '';\nconst STA_DATA_DIR = __DIR__ . '/data';\n" +
+      "const STA_COMMAND_TTL = 60;\nconst STA_ONLINE_WINDOW = 30;\nconst STA_ALLOW_ORIGIN = 'null';\n");
+    const port = 18000 + Math.floor(Math.random() * 1000);
+    const php = spawn("php", ["-S", "127.0.0.1:" + port, "-t", dir], { stdio: "ignore" });
+    await new Promise(r => setTimeout(r, 800));
+    relayPhase = true;
+    try {
+      r3 = await p2.evaluate(async (url) => {
+        const A = App, X = A.X, out = [];
+        const ok = (c, n) => out.push((c ? "PASS " : "FAIL ") + "relay: " + n);
+        const until = async (f, ms = 8000) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) return false; await new Promise(r => setTimeout(r, 50)); } return true; };
+        const btn = (re) => [...document.querySelectorAll("button")].find(b => re.test(b.textContent));
+        const post = (body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+        A.render();
+        X.setup.server = url; X.setup.name = "Relay test"; A.render();
+        btn(/^Set up$/).click();
+        ok(await until(() => X.cfg.gmKey && X.cfg.linkOn && X.status === "ok"), "set up a campaign on the relay (" + X.status + " " + X.statusText + ")");
+        const ping = await post({ action: "ping" });
+        ok(ping.version === 2, "relay reports version 2");
+
+        const k1 = X.cfg.gmKey;
+        btn(/^New GM key$/).click(); A.render();
+        ok(!!btn(/^Really issue a new GM key\?$/), "New GM key asks to confirm");
+        btn(/^Really issue a new GM key\?$/).click();
+        ok(await until(() => X.cfg.gmKey && X.cfg.gmKey !== k1), "a new key replaces the old one");
+        ok(RemoteMock.lib.Config && RemoteMock.lib.Config.gmKey === X.cfg.gmKey, "the new key is saved in the campaign");
+        const old = await post({ action: "gm.rename", campaign: X.cfg.campaign, gmKey: k1, name: "x" });
+        ok(old.error === "badKey", "the old key is refused by the relay");
+        await new Promise(r => setTimeout(r, 2500));
+        ok(X.cfg.linkOn && X.status !== "error", "the link keeps syncing with the new key (" + X.status + ")");
+
+        X.newName = "Ann"; A.render();
+        btn(/^New connection$/).click();
+        ok(await until(() => X.conns.some(c => c.name === "Ann") && Object.keys(X.assign).length === 1), "a connection with a join link");
+        const cid = Object.keys(X.assign)[0], join1 = X.assign[cid].join, t1 = join1.split("#t=")[1];
+        ok((await post({ action: "player.state", token: t1 })).ok, "the first link works");
+        btn(/^New link$/).click(); A.render();
+        btn(/^Really\? Their old link stops working$/).click();
+        ok(await until(() => X.assign[cid].join && X.assign[cid].join !== join1), "New link replaces the link");
+        const t2 = X.assign[cid].join.split("#t=")[1];
+        ok((await post({ action: "player.state", token: t1 })).error === "badToken", "the old link is refused");
+        ok((await post({ action: "player.state", token: t2 })).ok, "the new link works");
+        ok(RemoteMock.lib.Assign.conns[cid].join === X.assign[cid].join, "the new link is saved in the campaign");
+
+        // Another GM's window issues a new key and saves it; this window still has the old one.
+        const k3 = (await post({ action: "gm.rotateKey", campaign: X.cfg.campaign, gmKey: X.cfg.gmKey })).gmKey;
+        RemoteMock.lib.Config = Object.assign({}, RemoteMock.lib.Config, { gmKey: k3 });
+        ok(await until(() => X.cfg.gmKey === k3 && X.status === "ok", 10000) && X.cfg.linkOn,
+          "a key changed in another window is picked up; the link stays on (" + X.status + " " + X.statusText + ")");
+        ok(RemoteMock.lib.Config.gmKey === k3, "...and this window doesn't save its old key over it");
+        const chk = document.querySelector("input[type=checkbox]"); if (chk && chk.checked) chk.click();
+        await until(() => !X.cfg.linkOn);
+        return out;
+      }, "http://127.0.0.1:" + port + "/api.php");
+    } finally {
+      relayPhase = false;
+      php.kill();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    r3.forEach(l => console.log(l));
+  }
   console.log(errors.length ? "ERRORS:\n" + errors.join("\n") : "no page errors");
   await browser.close();
-  const all = results.concat(r2);
+  const all = results.concat(r2, r3);
   const failed = all.filter(l => !l.startsWith("PASS")).length;
   console.log((all.length - failed) + " passed, " + failed + " failed" + (errors.length ? ", " + errors.length + " page errors" : ""));
   process.exit(failed || errors.length ? 1 : 0);

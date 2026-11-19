@@ -22,14 +22,15 @@ The bundled documentation targets MapTool 1.13 or newer. The framework has also 
 
 [STA2e-Remote.mtlib](dist/STA2e-Remote.mtlib) lets players interact through a web page while the GM runs MapTool. Read the [remote add-on instructions](src/STA2e-Remote/README.md).
 
-The remote add-on requires a separate `api.php` relay server. The relay implementation is not included in this repository. The supplied add-on has `https://wizardsgate.net/sta-remote/api.php` as its default server address; this is not a promise of public relay access. Configure a relay you are authorized to use.
+The remote add-on requires the `api.php` relay server, installed on a PHP web server. It is in [src/STA2e-Relay](src/STA2e-Relay/README.md), with the player page. The supplied add-on has `https://wizardsgate.net/sta-remote/api.php` as its default server address; this is not a promise of public relay access. Configure a relay you are authorized to use.
 
 ## Source and maintenance
 
 | Location | Purpose |
 | --- | --- |
-| `src/STA2e/` | Core add-on source (1.8.2) |
-| `src/STA2e-Remote/` | Remote add-on source (0.6.4) |
+| `src/STA2e/` | Core add-on source (1.8.3) |
+| `src/STA2e-Remote/` | Remote add-on source (0.7.0) |
+| `src/STA2e-Relay/` | Relay server (`api.php`) and player page for the remote add-on (relay version 2) |
 | `src/STA2e-TokenTypes/` | Campaign property package source |
 | `dist/` | Installable MapTool packages |
 | `tools/build.py` | Package builder and source/package consistency check |

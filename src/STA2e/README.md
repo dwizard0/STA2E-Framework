@@ -21,6 +21,10 @@ Shared data (Momentum, Threat, banked assists, modifiers) is stored in the add-o
 
 Players can edit the tokens they own, and apply the results of their actions (Injuries, Stress, ship damage, shields and power) to other tokens through the window. Only the GM can spend Threat or change settings and modifiers. Players don't see the Notes of tokens they don't own.
 
+Players roll only as tokens they own. The Character and Ship tabs show them the player characters and the players' ship; NPC sheets only if the GM turns on **Players can open NPC character and ship sheets**. Tokens on the GM layer don't appear in a player's window at all, unless they own them, and neither do tokens hidden from players on the map the player is looking at. (MapTool can only check that last flag on the current map, so a hidden token on another map the player can see still appears.) Only the GM or a token's owner can use **Move to view**.
+
+This is a friendly-table trust model, not a secure one. Each player's window works out their rolls and attacks, so it reads the numbers of the NPCs they attack, and MapTool sends every client the whole campaign. A player who types macros in chat can still see more than the window shows them.
+
 Hovering over an STA2e token shows the **STA 2E Character** / **STA 2E Starship** stat sheet.
 
 ## Importing from the character builder
