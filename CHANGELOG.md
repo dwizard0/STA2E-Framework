@@ -1,5 +1,65 @@
 # Changelog
 
+## Core 1.8.3 / Remote 0.7.0 / Relay 2
+
+Permission fixes from the second review, confirmed in MapTool.
+
+### What players can see, roll as and move
+- **Players roll only as tokens they own.** "Rolling as" used to list every STA token, NPCs included.
+- **The Character and Ship tabs show players the player characters and the players' ship.** NPC sheets appear only if the GM turns on the new GM setting **Players can open NPC character and ship sheets**. Players still pick NPCs as targets, by name.
+- **Tokens on the GM layer, or hidden from players, no longer appear in a player's window**, unless the player owns them. `api/ctx`, `api/tokenGet` and `api/tokenSet` leave them out for players. MapTool can only check "visible to players" on the current map, so a hidden token on another map the player can see still appears; the GM layer is checked on every map.
+- **Only the GM or a token's owner can move it** with `api/tokenMove` (the **Move to view** button). A player's chat line could move any token, including hidden NPCs, into view.
+- A player who owns no character is told to ask the GM for ownership, instead of being shown someone else's.
+- The README says plainly that this is a friendly-table trust model: the window works out each player's rolls, so it reads the numbers of the NPCs they attack, and MapTool sends every client the whole campaign.
+
+### Remote: the GM key and players' links
+- The relay's GM key and each player's join link stay in the campaign, so the link works from any computer. Any player's MapTool can read them, so there are now buttons to replace them:
+  - **New GM key**, on the server card. The old key stops working at once.
+  - **New link**, on each connection card. The player's old link stops working; devices you approved from the list keep working.
+- If another GM window issues a new key, this window picks it up instead of switching the link off and saving its old key over the new one.
+
+### Relay and player page, now in the repository
+- `src/STA2e-Relay`: the relay (`api.php`) and the player page, as deployed at wizardsgate.net, plus a `config.example.php`. The real `config.php` isn't included.
+- Relay version 2 adds `gm.rotateKey` and `gm.newLink`. `ping` reports the version.
+- The player page offers Recover Stress only for characters who haven't had 3 from that task, and shows how many they've had.
+
+### Development
+- Checked in real MapTool (a GM and a player client against a scratch headless server with a copy of a real campaign): a GM-layer NPC and a hidden character were missing from the player's window and refused by `tokenGet`, `tokenSet` and `tokenMove`; the player rolled only as their own character; the GM still saw and moved everything.
+- End-to-end tests for the player rules above (the mock follows the new macro rules), and for the Remote window against a real copy of the relay run by PHP's built-in server. The relay tests are skipped if PHP isn't installed.
+
+## Core 1.8.2 / Remote 0.6.4
+
+Bug fixes from the second review. Each has an end-to-end test.
+
+### The hit choice always arrives
+- The "*Name* is hit" card now appears by itself whichever token the window is showing. Before, the GM only saw an NPC's choice if that NPC happened to be on screen, and otherwise had to press ⟳.
+- It also appears while a roll result is open. Before, a player in the middle of spending Momentum didn't see their own character's hit until they pressed Done.
+- A waiting hit on a token that has since been deleted no longer stops the others refreshing.
+
+### Buttons pressed twice
+- **Done**, **Add 2 Threat to avoid**, the re-rolls, Momentum spends, **Give N Momentum** and the Ship tab's Incoming damage **Apply** now act once however fast they're clicked. Before, a double-click on Done banked the roll's Momentum twice, and a double-click on the Determination re-roll spent 2 Determination.
+
+### Rules
+- **A free bonus die uses the first purchase slot (p.255).** With one free die from a talent, the next bought die costs 2 and the one after 3. Before, bought dice always started at 1. The buy buttons show each die's price. GM → Settings has a house rule to keep the old, cheaper reading. The remote add-on charges the same way.
+- **Recover Stress is capped at 3 per character from one task (p.278)**, not 3 in total. What one character can't take stays to give to someone else, and the card shows how many each has had. Same in the remote add-on.
+- **Ram shakes both ships** when the collision takes their shields below half or a quarter, like any other damage. Before, Ram never applied Shaken.
+- **Devastating Attack's extra hit keeps the weapon's Depleting quality**, so it can't shake the target.
+- Avoiding one hit while another hit on the same character has been accepted leaves them Defeated. Before, the avoid cleared Defeated.
+
+### Extended tasks
+- **Done** after **Succeed at Cost** marks the progress. Before, it closed the roll and the progress was lost.
+- If the GM removed the extended task while the result was open, Done says so, saves the Momentum and closes. Before, the result stayed open with no message.
+
+### Rolling as
+- The players' ship is no longer offered under "Rolling as": it assists a character's roll and doesn't roll for itself. Ships with an NPC crew are still listed.
+
+### Smaller
+- Character names are escaped in the opposed-task and extended-task chat cards.
+
+### Remote add-on, for whoever hosts the player page
+- The roll view's `allies` entries gain `recovered` (Stress recovered from this task), and the view gains `stressBy`. `stressFixed` is still sent for older player pages; it reaches 3 only when no one can recover any more.
+- A player page that shows the price of bought dice should add the free bonus dice first. The GM's window is what charges, and its "Not enough Momentum" message now states the cost.
+
 ## Core 1.8.1
 
 - A Notable NPC that has already avoided an Injury this scene no longer gets Avoid buttons, on the hit card or the Character tab. A new hit on it Defeats at once, as the rules say (p.347). Before, the buttons showed and were refused when clicked.

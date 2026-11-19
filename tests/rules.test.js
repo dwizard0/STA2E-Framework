@@ -76,6 +76,17 @@ test("Momentum cap is 6", (R) => {
   assert.strictEqual(R.MOMENTUM_CAP, 6);
 });
 
+// ---- Buying dice (p.255): 1, 2, 3 Momentum; a free bonus die uses the first slot ----
+test("buying dice costs 1, then 2, then 3", (R) => {
+  assert.deepStrictEqual([0, 1, 2, 3].map((n) => R.purchaseCost(n)), [0, 1, 3, 6]);
+});
+test("a free bonus die makes the next bought die cost 2", (R) => {
+  assert.strictEqual(R.purchaseCost(1, 1), 2);
+  assert.strictEqual(R.purchaseCost(2, 1), 5);
+  assert.strictEqual(R.purchaseCost(1, 2), 3);
+  assert.strictEqual(R.purchaseCost(2, 0), 3);
+});
+
 let failed = 0, passed = 0;
 for (const page of PAGES) {
   let R;
